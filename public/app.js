@@ -516,6 +516,7 @@ socket.on('init', (payload) => {
     state.logs = payload.logs || [];
   }
   state.config = payload.config || {};
+  state.config.rules = payload.rules || {};
   setInputVal(els.hostInput, state.config.host || '');
   setInputVal(els.tgTemplate, state.config.tgTemplate || '');
   els.serverLine.textContent = `${state.config.host || '—'}:${state.config.port || '—'} · ${state.config.version || '—'}`;
