@@ -344,50 +344,32 @@ function addToChatBuffer(botLabel, username, message) {
   if (buf.length > 15) buf.shift();
 }
 
-// Ожидающие контекст нарушения
-const pendingContexts = [];
-
-function onChatMessageForContext(botLabel, username, message) {
-  const line = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
-  for (const ctx of pendingContexts) {
-    if (ctx.botLabel !== botLabel) continue;
-    if (ctx.after.length < 15) {
-      ctx.after.push(line);
-      if (ctx.after.length >= 15) {
-        clearTimeout(ctx._timer);
-        ctx._send();
-      }
-    }
-  }
-}
+// Ожидающие контекст удаления больше не нужны
 
 function truncateLine(line, max = 80) {
   return line.length > max ? line.slice(0, max - 1) + '…' : line;
 }
 
-function buildContextText(before, violationLine, after) {
+function buildContextText(before, violationLine) {
   const LIMIT = 3800; // запас под заголовки
   const header1 = '— до —';
   const header2 = '\n▶ НАРУШЕНИЕ ◀';
-  const header3 = '\n— после —';
   const vLine = truncateLine(violationLine, 120);
 
   const beforeTrunc = before.map(l => truncateLine(l));
-  const afterTrunc = after.map(l => truncateLine(l));
 
-  let text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.join('\n')}`;
+  let text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}`;
 
   // Если всё равно не влезает — обрезаем строки агрессивнее
   if (text.length > LIMIT) {
     const short = l => truncateLine(l, 50);
-    text = `${header1}\n${beforeTrunc.map(short).join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.map(short).join('\n')}`;
+    text = `${header1}\n${beforeTrunc.map(short).join('\n')}${header2}\n${vLine}`;
   }
 
   // Если всё ещё не влезает — берём меньше сообщений
   if (text.length > LIMIT) {
-    const b = beforeTrunc.slice(-8).map(l => truncateLine(l, 50));
-    const a = afterTrunc.slice(0, 8).map(l => truncateLine(l, 50));
-    text = `${header1}\n${b.join('\n')}${header2}\n${vLine}${header3}\n${a.join('\n')}`;
+    const b = beforeTrunc.slice(-10).map(l => truncateLine(l, 50));
+    text = `${header1}\n${b.join('\n')}${header2}\n${vLine}`;
   }
 
   return text;
@@ -398,22 +380,18 @@ function tgNotifyViolation(violationText, username, message, botLabel) {
   const before = [...(chatBuffers.get(botLabel) || [])];
   const violationLine = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
 
-  // Собираем после и шлём одним сообщением
-  const after = [];
-  const ctx = { before, violationLine, botLabel, after, violationText };
+  // Убираем само сообщение-нарушение из контекста "до", если оно туда уже попало
+  if (before.length > 0 && before[before.length - 1].endsWith(`${username}: ${message}`)) {
+    before.pop();
+  }
 
-  const send = () => {
-    const idx = pendingContexts.indexOf(ctx);
-    if (idx !== -1) pendingContexts.splice(idx, 1);
-    const contextBlock = buildContextText(ctx.before, ctx.violationLine, ctx.after);
-    const full = `${ctx.violationText}\n\n${contextBlock}`;
-    // Если не влезает — обрезаем до 4096
-    tgBot.sendMessage(GROUP_CHAT_ID, full.slice(0, 4096)).catch(() => {});
-  };
-
-  ctx._timer = setTimeout(send, 60 * 1000);
-  ctx._send = send;
-  pendingContexts.push(ctx);
+  const contextBlock = buildContextText(before, violationLine);
+  const full = `${violationText}\n\n${contextBlock}`;
+  
+  // Отправляем сразу, обрезая при необходимости
+  tgBot.sendMessage(GROUP_CHAT_ID, full.slice(0, 4096)).catch((err) => {
+    console.error('[TG] Ошибка отправки уведомления:', err.message);
+  });
 
   addPanelLog('action', `[${username}]: ${message}`, botLabel);
 }
@@ -596,7 +574,6 @@ function logChatMessage(botLabel, username, message) {
     }
   }
   addToChatBuffer(botLabel, username, message);
-  onChatMessageForContext(botLabel, username, message);
   addPanelLog('chat', `${username}: ${message}`, botLabel, username);
 }
 
@@ -1327,12 +1304,14 @@ io.on('connection', (socket) => {
   });
 });
 
+app.get('/health', (req, res) => res.send('OK'));
+
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[WEB] Порт ${config.panelPort || 4218} занят.`);
+    console.error(`[WEB] Порт ${process.env.PORT || config.panelPort || 4218} занят.`);
   }
 });
-server.listen(process.env.PORT || config.panelPort || 4218, () => {
+server.listen(process.env.PORT || config.panelPort || 4218, '0.0.0.0', () => {
   console.log(`[WEB] Panel ready on port ${process.env.PORT || config.panelPort || 4218}`);
 });
 
