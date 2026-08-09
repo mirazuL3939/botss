@@ -200,16 +200,33 @@ else console.log('[GROQ] GROQ_API_KEY не задан, AI детектор от�
 // Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
 const groqCache = new Map();
 let groqLastCall = 0;
-const GROQ_MIN_INTERVAL = 2000; // не чаще раза в 2 секунды
+const GROQ_MIN_INTERVAL = 5000; // не чаще раза в 5 секунд
+const groqQueue = []; // очередь запросов
+let groqProcessing = false;
+
+async function processGroqQueue() {
+  if (groqProcessing || groqQueue.length === 0) return;
+  groqProcessing = true;
+  const { username, message, botLabel } = groqQueue.shift();
+  try {
+    await checkWithGroq(username, message, botLabel);
+  } catch(e) {}
+  groqProcessing = false;
+  if (groqQueue.length > 0) {
+    setTimeout(processGroqQueue, GROQ_MIN_INTERVAL);
+  }
+}
+
+function enqueueGroq(username, message, botLabel) {
+  // Не накапливаем очередь больше 10 — старые неважны
+  if (groqQueue.length >= 10) groqQueue.shift();
+  groqQueue.push({ username, message, botLabel });
+  if (!groqProcessing) setTimeout(processGroqQueue, GROQ_MIN_INTERVAL);
+}
 
 async function checkWithGroq(username, message, botLabel) {
   if (!groq) return;
-  // Не проверяем короткие сообщения и команды
   if (message.length < 8 || message.startsWith('/')) return;
-  // Троттлинг — не чаще раза в 2 секунды
-  const now = Date.now();
-  if (now - groqLastCall < GROQ_MIN_INTERVAL) return;
-  groqLastCall = now;
 
   const cacheKey = message.toLowerCase().trim();
   if (groqCache.has(cacheKey)) {
@@ -811,8 +828,8 @@ function checkViolations(username, message, botLabel) {
     addPanelLog('action', logText, botLabel);
     tgNotifyViolation(tgFormatted(username, message, violation, botLabel), username, message, botLabel);
   } else {
-    // Словарь не сработал — отправляем на проверку AI
-    checkWithGroq(username, message, botLabel);
+    // Словарь не сработал — отправляем в очередь AI
+    enqueueGroq(username, message, botLabel);
   }
 }
 
