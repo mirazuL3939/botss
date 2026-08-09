@@ -341,35 +341,46 @@ function addToChatBuffer(botLabel, username, message) {
   const buf = chatBuffers.get(botLabel);
   const now = new Date();
   buf.push(`[${fmtTime(now)}] [${botLabel}] ${username}: ${message}`);
-  if (buf.length > 15) buf.shift();
+  if (buf.length > 25) buf.shift();
 }
 
-// Ожидающие контекст удаления больше не нужны
+const pendingContexts = [];
+
+function onChatMessageForContext(botLabel, username, message) {
+  const line = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
+  for (const ctx of pendingContexts) {
+    if (ctx.botLabel !== botLabel) continue;
+    ctx.after.push(line);
+    if (ctx.after.length >= 25) {
+      clearTimeout(ctx._timer);
+      ctx._send();
+    }
+  }
+}
 
 function truncateLine(line, max = 80) {
   return line.length > max ? line.slice(0, max - 1) + '…' : line;
 }
 
-function buildContextText(before, violationLine) {
-  const LIMIT = 3800; // запас под заголовки
+function buildContextText(before, violationLine, after) {
   const header1 = '— до —';
   const header2 = '\n▶ НАРУШЕНИЕ ◀';
+  const header3 = after && after.length ? '\n— после —' : '';
   const vLine = truncateLine(violationLine, 120);
 
-  const beforeTrunc = before.map(l => truncateLine(l));
+  const beforeTrunc = before.map(l => truncateLine(l, 80));
+  const afterTrunc = (after || []).map(l => truncateLine(l, 80));
 
-  let text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}`;
+  let text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.join('\n')}`.trim();
 
-  // Если всё равно не влезает — обрезаем строки агрессивнее
-  if (text.length > LIMIT) {
-    const short = l => truncateLine(l, 50);
-    text = `${header1}\n${beforeTrunc.map(short).join('\n')}${header2}\n${vLine}`;
-  }
-
-  // Если всё ещё не влезает — берём меньше сообщений
-  if (text.length > LIMIT) {
-    const b = beforeTrunc.slice(-10).map(l => truncateLine(l, 50));
-    text = `${header1}\n${b.join('\n')}${header2}\n${vLine}`;
+  // Пока текст не влезает в лимит Telegram (оставляем запас для заголовка)
+  while (text.length > 3800 && (beforeTrunc.length > 0 || afterTrunc.length > 0)) {
+    if (beforeTrunc.length > afterTrunc.length) {
+      beforeTrunc.shift(); // удаляем самое старое из "до"
+    } else {
+      afterTrunc.pop(); // удаляем самое новое из "после"
+    }
+    text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.join('\n')}`.trim();
   }
 
   return text;
@@ -385,13 +396,25 @@ function tgNotifyViolation(violationText, username, message, botLabel) {
     before.pop();
   }
 
-  const contextBlock = buildContextText(before, violationLine);
-  const full = `${violationText}\n\n${contextBlock}`;
-  
-  // Отправляем сразу, обрезая при необходимости
-  tgBot.sendMessage(GROUP_CHAT_ID, full.slice(0, 4096)).catch((err) => {
-    console.error('[TG] Ошибка отправки уведомления:', err.message);
-  });
+  const after = [];
+  const ctx = { before, violationLine, botLabel, after, violationText };
+
+  const send = () => {
+    const idx = pendingContexts.indexOf(ctx);
+    if (idx !== -1) pendingContexts.splice(idx, 1);
+    
+    const contextBlock = buildContextText(ctx.before, ctx.violationLine, ctx.after);
+    const full = `${ctx.violationText}\n\n${contextBlock}`;
+    
+    tgBot.sendMessage(GROUP_CHAT_ID, full.slice(0, 4096)).catch((err) => {
+      console.error('[TG] Ошибка отправки уведомления:', err.message);
+    });
+  };
+
+  // Ждем 30 секунд или до 25 сообщений после нарушения
+  ctx._timer = setTimeout(send, 30 * 1000);
+  ctx._send = send;
+  pendingContexts.push(ctx);
 
   addPanelLog('action', `[${username}]: ${message}`, botLabel);
 }
@@ -574,6 +597,7 @@ function logChatMessage(botLabel, username, message) {
     }
   }
   addToChatBuffer(botLabel, username, message);
+  onChatMessageForContext(botLabel, username, message);
   addPanelLog('chat', `${username}: ${message}`, botLabel, username);
 }
 
