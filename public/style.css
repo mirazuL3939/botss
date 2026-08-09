@@ -148,7 +148,7 @@ h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-
   max-width: 1400px;
   margin: 0 auto;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
 }
@@ -625,7 +625,7 @@ select {
 
 /* ── Панель отправки в чат ─────────────── */
 .chat-send-card {
-  margin-bottom: 0;
+  padding: 10px 12px;
 }
 
 .chat-send-row {
@@ -634,49 +634,33 @@ select {
   align-items: center;
 }
 
-.chat-send-row select {
+.chat-bot-select {
   background: var(--input-bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 12px;
   cursor: pointer;
   outline: none;
+  flex-shrink: 0;
 }
 
-.chat-send-row select:focus {
+.chat-bot-select:focus {
   border-color: var(--border-strong);
 }
 
-.chat-send-row input {
+.chat-send-input {
   flex: 1;
   background: var(--input-bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   outline: none;
 }
 
-.chat-send-row input:focus {
+.chat-send-input:focus {
   border-color: var(--border-strong);
-}
-
-.chat-send-row button {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 18px;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s;
-}
-
-.chat-send-row button:hover {
-  background: rgba(201, 211, 223, 0.2);
 }

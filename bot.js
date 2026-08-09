@@ -344,7 +344,7 @@ function addPanelLog(type, text, botLabel, username) {
   const now = new Date();
   const entry = {
     timestamp: now.getTime(),
-    date: now.toISOString().slice(0, 10),
+    date: now.toLocaleDateString('ru-RU'),
     time: now.toLocaleTimeString('ru-RU'),
     type,
     text,
