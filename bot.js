@@ -1332,8 +1332,8 @@ server.on('error', (err) => {
     console.error(`[WEB] Порт ${config.panelPort || 4218} занят.`);
   }
 });
-server.listen(config.panelPort || 4218, () => {
-  console.log(`[WEB] Panel ready: http://localhost:${config.panelPort || 4218}`);
+server.listen(process.env.PORT || config.panelPort || 4218, () => {
+  console.log(`[WEB] Panel ready on port ${process.env.PORT || config.panelPort || 4218}`);
 });
 
 startBots();
