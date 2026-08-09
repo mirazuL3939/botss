@@ -22,6 +22,8 @@ const els = {
   chatBotSelect: $('chatBotSelect'),
   chatSendInput: $('chatSendInput'),
   chatSendBtn: $('chatSendBtn'),
+  botToggleBtn: $('botToggleBtn'),
+  botRestartBtn: $('botRestartBtn'),
   openLinksPanel: $('openLinksPanel'),
   linksModal: $('linksModal'),
   linksList: $('linksList'),
@@ -406,13 +408,45 @@ function renderChatBotSelect() {
     const opt = document.createElement('option');
     opt.value = b.username;
     opt.textContent = `${b.label || b.username} (${b.status === 'online' ? '🟢' : '🔴'})`;
-    opt.disabled = b.status !== 'online';
     els.chatBotSelect.appendChild(opt);
   });
   if (prev && [...els.chatBotSelect.options].some(o => o.value === prev)) {
     els.chatBotSelect.value = prev;
   }
+  updateBotButtons();
 }
+
+function updateBotButtons() {
+  const username = els.chatBotSelect.value;
+  const bot = state.bots.find(b => b.username === username);
+  const online = bot?.status === 'online';
+  els.botToggleBtn.textContent = online ? '⏹ Стоп' : '▶ Старт';
+  els.botToggleBtn.style.color = online ? 'var(--red)' : 'var(--accent)';
+  els.chatSendInput.disabled = !online;
+  els.chatSendBtn.disabled = !online;
+}
+
+els.chatBotSelect.addEventListener('change', updateBotButtons);
+
+els.botToggleBtn.addEventListener('click', () => {
+  const username = els.chatBotSelect.value;
+  const bot = state.bots.find(b => b.username === username);
+  if (!bot) return;
+  if (bot.status === 'online') {
+    socket.emit('bot_stop', { username });
+    showToast(`⏹ Останавливаю ${username}...`);
+  } else {
+    socket.emit('bot_start', { username });
+    showToast(`▶ Запускаю ${username}...`);
+  }
+});
+
+els.botRestartBtn.addEventListener('click', () => {
+  const username = els.chatBotSelect.value;
+  if (!username) return;
+  socket.emit('bot_restart', { username });
+  showToast(`↺ Перезапускаю ${username}...`);
+});
 
 function sendChatMessage() {
   const text = els.chatSendInput.value.trim();

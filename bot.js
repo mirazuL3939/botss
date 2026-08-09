@@ -10,11 +10,14 @@ const fs = require('fs');
 // Время в консоли (cmd)
 const _origLog = console.log;
 const _origError = console.error;
-function consoleTs() { return new Date().toLocaleTimeString('ru-RU'); }
+function consoleTs() { return new Date().toLocaleTimeString('ru-RU', { timeZone: process.env.TZ || 'Asia/Yekaterinburg' }); }
 console.log = (...args) => _origLog(`[${consoleTs()}]`, ...args);
 console.error = (...args) => _origError(`[${consoleTs()}]`, ...args);
 
-// Настройки
+// Хелпер для форматирования даты/времени в нужной таймзоне
+const TZ = process.env.TZ || 'Asia/Yekaterinburg';
+function fmtDate(d) { return d.toLocaleDateString('ru-RU', { timeZone: TZ }); }
+function fmtTime(d) { return d.toLocaleTimeString('ru-RU', { timeZone: TZ }); }
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const LOGS_DIR = path.join(__dirname, 'logs');
 
@@ -52,8 +55,8 @@ function saveTodayLogs(logsArray) {
 
 function formatTextLogEntry(entry) {
   const now = entry?.timestamp ? new Date(entry.timestamp) : new Date();
-  const date = entry?.date || now.toISOString().slice(0, 10);
-  const time = entry?.time || now.toLocaleTimeString('ru-RU');
+  const date = entry?.date || fmtDate(now);
+  const time = entry?.time || fmtTime(now);
   const bot = entry?.bot || 'system';
   const type = entry?.type || 'info';
   const user = entry?.username ? `${entry.username}: ` : '';
@@ -197,8 +200,8 @@ function tgNotify(text) {
 
 function tgFormatted(username, message, rule, botLabel) {
   const now = new Date();
-  const date = now.toLocaleDateString('ru-RU');
-  const time = now.toLocaleTimeString('ru-RU');
+  const date = fmtDate(now);
+  const time = fmtTime(now);
   const ruleNum = rule.match(/^[\d.]+/)?.[0] || '';
   const desc = rule.replace(/^[\d.]+\s*/, '').replace(/\s*—.*$/, '');
   const punishment = rule.match(/—\s*(.+)$/)?.[1] || '';
@@ -344,8 +347,8 @@ function addPanelLog(type, text, botLabel, username) {
   const now = new Date();
   const entry = {
     timestamp: now.getTime(),
-    date: now.toLocaleDateString('ru-RU'),
-    time: now.toLocaleTimeString('ru-RU'),
+    date: fmtDate(now),
+    time: fmtTime(now),
     type,
     text,
     bot: botLabel || 'system'

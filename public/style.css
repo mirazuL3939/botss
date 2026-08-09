@@ -668,3 +668,10 @@ select {
 .chat-send-input:focus {
   border-color: var(--border-strong);
 }
+
+.chat-send-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  flex-shrink: 0;
+}
