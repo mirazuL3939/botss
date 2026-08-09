@@ -135,7 +135,7 @@ const defaultConfig = {
       words: [],
       capsThreshold: 4,
       spamThreshold: 3,
-      spamWindowMs: 1500,
+      spamWindowMs: 60000,
       minMessageLength: 2,
       floodThreshold: 3
     },
@@ -569,18 +569,21 @@ setInterval(() => {
 
 const recentMessages = new Map();
 
-function isDuplicate(username, message) {
-  const key = `${username}:${cleanText(message)}`;
+function isDuplicate(username, message, botLabel, source) {
+  const key = `${botLabel}:${username}:${cleanText(message)}`;
   const now = Date.now();
-  const lastTime = recentMessages.get(key) || 0;
-  if (now - lastTime < 2000) {
+  const previous = recentMessages.get(key);
+
+  // Одно сообщение приходит и через chat, и через message. Повтор от того же
+  // источника считаем новым сообщением, чтобы не пропускать настоящий флуд.
+  if (previous && now - previous.time < 1500 && previous.source !== source) {
     return true;
   }
-  recentMessages.set(key, now);
+  recentMessages.set(key, { time: now, source });
   if (Math.random() < 0.1) {
-    const cutoff = Date.now() - 5000;
-    for (const [k, time] of recentMessages) {
-      if (time < cutoff) recentMessages.delete(k);
+    const cutoff = now - 60000;
+    for (const [k, entry] of recentMessages) {
+      if (entry.time < cutoff) recentMessages.delete(k);
     }
   }
   return false;
@@ -698,23 +701,25 @@ function isScamLink(text) {
   try { return isAdvertising(text) && rule.scamExtra.test(text); } catch { return isAdvertising(text); }
 }
 
-const playerMsgTimes = new Map();
+const playerMessageHistory = new Map();
 
-//ну кста спам не логирует, т.к хуй знает криво косо ну да
-
-function isFlood(username, message) {
+function isFlood(username, message, botLabel) {
   const rule = config.rules['2.7'];
   const now = Date.now();
   if (message.length < (rule.minMessageLength || 2)) return false;
-  if (!playerMsgTimes.has(username)) playerMsgTimes.set(username, []);
-  const times = playerMsgTimes.get(username);
-  const windowMs = rule.spamWindowMs || 1500;   // используется для окна флуда
-  const floodThreshold = rule.floodThreshold || 3;
-  const recent = times.filter(entry => now - entry.time < windowMs);
-  if (recent.length < floodThreshold) return false;
-  const lastN = recent.slice(-floodThreshold);
-  const firstText = lastN[0].text;
-  return lastN.every(entry => entry.text === firstText);
+  const key = `${botLabel}:${username}`;
+  const windowMs = rule.spamWindowMs || 60000;
+  const floodThreshold = rule.floodThreshold || rule.spamThreshold || 3;
+  const normalizedMessage = cleanText(message);
+  const history = (playerMessageHistory.get(key) || [])
+    .filter(entry => now - entry.time < windowMs);
+
+  history.push({ time: now, text: normalizedMessage });
+  playerMessageHistory.set(key, history);
+
+  const repeats = history.filter(entry => entry.text === normalizedMessage).length;
+  // Сообщаем только когда достигнут порог, а не на каждом последующем повторе.
+  return repeats === floodThreshold;
 }
 
 function toText(message) {
@@ -926,10 +931,11 @@ function reportViolation(username, message, botLabel, violation) {
 
 // Проверка нарушений: очевидные технические нарушения отмечаются сразу,
 // а фразы с возможным двойным смыслом проходят через AI с историей чата.
-function checkViolations(username, message, botLabel) {
-  if (isDuplicate(username, message)) return;
+function checkViolations(username, message, botLabel, source) {
+  if (isDuplicate(username, message, botLabel, source)) return;
   const cleaned = cleanText(message);
   const rules = config.rules;
+  const floodDetected = isFlood(username, message, botLabel);
 
   if (isAdvertising(message)) {
     reportViolation(
@@ -938,6 +944,11 @@ function checkViolations(username, message, botLabel) {
       botLabel,
       isScamLink(message) ? '2.13 (Скам-реклама) — пермаментный бан' : '2.13 (Реклама) — бан 3ч'
     );
+    return;
+  }
+
+  if (floodDetected) {
+    reportViolation(username, message, botLabel, '2.7 (Флуд) — мут 20м');
     return;
   }
 
@@ -957,8 +968,6 @@ function checkViolations(username, message, botLabel) {
     reportViolation(username, message, botLabel, fallbackViolation);
   } else if (countUpperCaseWords(message) >= (rules['2.7'].capsThreshold || 4)) {
     reportViolation(username, message, botLabel, '2.7 (Капс) — мут 30м');
-  } else if (isFlood(username, message)) {
-    reportViolation(username, message, botLabel, '2.7 (Флуд) — мут 20м');
   }
 }
 
@@ -1024,7 +1033,7 @@ function createBot(botInfo) {
   bot.on('chat', (username, message) => {
   if (username === bot.username) return;
   logChatMessage(botInfo.label, username, message);
-  checkViolations(username, message, botInfo.label);
+  checkViolations(username, message, botInfo.label, 'chat');
 });
 
 
@@ -1062,7 +1071,7 @@ if (!username) username = extractUsername(msgText);
 
 if (username && username !== bot.username) {
     logChatMessage(botInfo.label, username, afterArrow);
-    checkViolations(username, afterArrow, botInfo.label);
+    checkViolations(username, afterArrow, botInfo.label, 'message');
 }
   });
 

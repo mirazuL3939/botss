@@ -193,7 +193,7 @@
       "words": [],
       "capsThreshold": 4,
       "spamThreshold": 3,
-      "spamWindowMs": 1500,
+      "spamWindowMs": 60000,
       "minMessageLength": 2,
       "floodThreshold": 3
     },
