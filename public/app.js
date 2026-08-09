@@ -475,7 +475,23 @@ const viewGames = $('viewGames');
 const btnViewMain = $('btnViewMain');
 const btnViewGames = $('btnViewGames');
 
-function switchView_old(name) {
+function switchView(name) {
+  const games = name === 'games';
+  const rules = name === 'rules';
+  viewMain.hidden = games || rules;
+  viewGames.hidden = !games;
+  const viewRulesEl = $('viewRules');
+  if (viewRulesEl) viewRulesEl.hidden = !rules;
+  btnViewMain.classList.toggle('active', !games && !rules);
+  btnViewGames.classList.toggle('active', games);
+  const btnRules = $('btnViewRules');
+  if (btnRules) btnRules.classList.toggle('active', rules);
+  if (window.MiniGames) {
+    if (games) MiniGames.show();
+    else MiniGames.hide();
+  }
+  if (rules) renderRules();
+}
 
 btnViewMain.addEventListener('click', () => switchView('main'));
 btnViewGames.addEventListener('click', () => switchView('games'));
@@ -624,23 +640,5 @@ function renderRules() {
 }
 
 /* ── Вкладка Триггеры ────────────────────── */
-const viewRules = $('viewRules');
 const btnViewRules = $('btnViewRules');
-
-function switchView(name) {
-  const games = name === 'games';
-  const rules = name === 'rules';
-  viewMain.hidden = games || rules;
-  viewGames.hidden = !games;
-  if (viewRules) viewRules.hidden = !rules;
-  btnViewMain.classList.toggle('active', !games && !rules);
-  if (btnViewRules) btnViewRules.classList.toggle('active', rules);
-  btnViewGames.classList.toggle('active', games);
-  if (window.MiniGames) {
-    if (games) MiniGames.show();
-    else MiniGames.hide();
-  }
-  if (rules) renderRules();
-}
-
 if (btnViewRules) btnViewRules.addEventListener('click', () => switchView('rules'));
