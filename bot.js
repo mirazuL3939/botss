@@ -885,11 +885,43 @@ function createBot(botInfo) {
     }, 5 * 60 * 1000);
   });
 
+  // Сервер иногда шлёт одно и то же сообщение через несколько chat-пакетов:
+  // один раз с настоящим ником (но текст вида "Ник: текст"), второй раз —
+  // с кланом/привилегией вместо ника, а настоящий ник спрятан в тексте
+  // перед стрелкой "⇨"/"⇒" (например "CheatMine: Luzarim ⇨ текст").
+  // Приводим оба варианта к одному чистому нику, чтобы в логах и панели
+  // отображался только реальный ник игрока, без дублей.
+  function normalizeChatEvent(username, message) {
+    if (!message) return { username, message: '' };
+
+    const arrowMatch = message.match(/[⇨⇒]/);
+    if (arrowMatch) {
+      const idx = arrowMatch.index;
+      const beforeArrow = message.slice(0, idx);
+      const afterArrow = message.slice(idx + 1).trim();
+      // Реальный ник — последнее слово перед стрелкой (клан/ранг и значки
+      // вроде "✓" перед стрелкой в результат не попадают)
+      const nickTokens = beforeArrow.match(/[A-Za-zА-Яа-яЁё0-9_]{3,16}/g);
+      const realNick = nickTokens && nickTokens.length ? nickTokens[nickTokens.length - 1] : null;
+      return {
+        username: realNick || username,
+        message: afterArrow
+      };
+    }
+
+    // Убираем дублирование ника в начале сообщения: "Ник: текст" -> "текст"
+    const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const dupPrefix = new RegExp('^' + escaped + '\\s*:\\s*');
+    return { username, message: message.replace(dupPrefix, '').trim() };
+  }
+
   bot.on('chat', (username, message) => {
-  if (username === bot.username) return;
-  logChatMessage(botInfo.label, username, message);
-  checkViolations(username, message, botInfo.label, 'chat');
-});
+    if (username === bot.username) return;
+    const normalized = normalizeChatEvent(username, message);
+    if (!normalized.username) return;
+    logChatMessage(botInfo.label, normalized.username, normalized.message);
+    checkViolations(normalized.username, normalized.message, botInfo.label, 'chat');
+  });
 
 
   bot.on('message', (jsonMsg) => {
