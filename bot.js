@@ -275,7 +275,7 @@ async function checkWithGroq(username, message, botLabel) {
 {"violation": true или false, "rule": "номер правила или null", "punishment": "наказание или null"}`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-specdec',
+      model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 80,
       temperature: 0.1
