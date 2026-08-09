@@ -475,17 +475,7 @@ const viewGames = $('viewGames');
 const btnViewMain = $('btnViewMain');
 const btnViewGames = $('btnViewGames');
 
-function switchView(name) {
-  const games = name === 'games';
-  viewMain.hidden = games;
-  viewGames.hidden = !games;
-  btnViewMain.classList.toggle('active', !games);
-  btnViewGames.classList.toggle('active', games);
-  if (window.MiniGames) {
-    if (games) MiniGames.show();
-    else MiniGames.hide();
-  }
-}
+function switchView_old(name) {
 
 btnViewMain.addEventListener('click', () => switchView('main'));
 btnViewGames.addEventListener('click', () => switchView('games'));
@@ -558,3 +548,99 @@ socket.on('send_command_result', (data) => {
   if (data.success) showToast(`✅ Отправлено (${data.username}): ${data.text}`);
   else showToast(`❌ Не отправлено: ${data.reason || 'бот оффлайн'}`);
 });
+
+/* ── Триггеры ────────────────────────────── */
+
+const RULE_LABELS = {
+  '2.1': 'Оскорбления',
+  '2.3': 'Личная жизнь',
+  '2.4': 'Провокации',
+  '2.5': 'Попрошайничество',
+  '2.9': 'Разжигание розни',
+  '2.10': 'Введение в заблуждение',
+  '2.13': 'Реклама',
+  '2.14': 'Угрозы'
+};
+
+function renderRules() {
+  const container = $('rulesContainer');
+  if (!container) return;
+  const rules = state.config.rules || {};
+  container.innerHTML = '';
+
+  Object.entries(RULE_LABELS).forEach(([id, label]) => {
+    const rule = rules[id];
+    if (!rule || !Array.isArray(rule.words)) return;
+
+    const card = document.createElement('div');
+    card.className = 'card rule-card';
+
+    const head = document.createElement('div');
+    head.className = 'card-head';
+    head.innerHTML = `<h2>${id} — ${label}</h2><span class="badge rule-badge-${id}">saved</span>`;
+    card.appendChild(head);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'rule-textarea';
+    textarea.rows = 4;
+    textarea.spellcheck = false;
+    textarea.value = rule.words.join(', ');
+    textarea.placeholder = 'слово1, слово2, ...';
+
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = `${rule.words.length} слов · через запятую`;
+
+    const badge = head.querySelector(`.rule-badge-${id}`);
+    badge.textContent = 'saved ✓';
+    badge.classList.add('ok');
+
+    const save = debounce(() => {
+      const words = textarea.value
+        .split(',')
+        .map(w => w.trim().toLowerCase())
+        .filter(Boolean);
+      socket.emit('update_rules', { [id]: { words } });
+      // Обновляем локальный стейт сразу
+      if (state.config.rules && state.config.rules[id]) {
+        state.config.rules[id].words = words;
+      }
+      hint.textContent = `${words.length} слов · через запятую`;
+      badge.textContent = 'saved ✓';
+      badge.classList.add('ok');
+      showToast(`✅ Правило ${id} обновлено`);
+    }, 800);
+
+    textarea.addEventListener('input', () => {
+      badge.textContent = 'editing…';
+      badge.classList.remove('ok');
+      save();
+    });
+
+    card.appendChild(textarea);
+    card.appendChild(hint);
+    container.appendChild(card);
+  });
+}
+
+/* ── Вкладка Триггеры ────────────────────── */
+const viewRules = $('viewRules');
+const btnViewRules = $('btnViewRules');
+
+function switchView(name) {
+  const games = name === 'games';
+  const rules = name === 'rules';
+  viewMain.hidden = games || rules;
+  viewGames.hidden = !games;
+  if (viewRules) viewRules.hidden = !rules;
+  btnViewMain.classList.toggle('active', !games && !rules);
+  if (btnViewRules) btnViewRules.classList.toggle('active', rules);
+  btnViewGames.classList.toggle('active', games);
+  if (window.MiniGames) {
+    if (games) MiniGames.show();
+    else MiniGames.hide();
+  }
+  if (rules) renderRules();
+}
+
+if (btnViewRules) btnViewRules.addEventListener('click', () => switchView('rules'));

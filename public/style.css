@@ -675,3 +675,42 @@ select {
   background: var(--border);
   flex-shrink: 0;
 }
+
+/* ── Триггеры ───────────────────────────── */
+.rules-view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.rules-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.rule-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule-textarea {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+}
+
+.rule-textarea:focus {
+  border-color: var(--border-strong);
+}
