@@ -6,6 +6,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const Groq = require('groq-sdk');
 
 // Время в консоли (cmd)
 const _origLog = console.log;
@@ -19,7 +20,10 @@ const TZ = process.env.TZ || 'Etc/GMT-5';
 function fmtDate(d) { return d.toLocaleDateString('ru-RU', { timeZone: TZ }); }
 function fmtTime(d) { return d.toLocaleTimeString('ru-RU', { timeZone: TZ }); }
 const CONFIG_PATH = path.join(__dirname, 'config.json');
-const LOGS_DIR = path.join(__dirname, 'logs');
+const LOGS_DIR = process.env.LOGS_DIR
+  ? path.join(process.env.LOGS_DIR, 'logs')
+  : path.join(__dirname, 'logs');
+const FULL_LOG_PATH = path.join(LOGS_DIR, '_full.txt'); // полный вечный лог
 
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -71,6 +75,12 @@ function appendTextLogEntry(entry) {
     fs.appendFileSync(filePath, `${formatTextLogEntry(entry)}\n`, 'utf8');
   } catch (err) {
     console.error('[LOGS] Plain-text log append failed:', err.message);
+  }
+  // Также пишем в вечный полный лог
+  try {
+    fs.appendFileSync(FULL_LOG_PATH, `${formatTextLogEntry(entry)}\n`, 'utf8');
+  } catch (err) {
+    console.error('[LOGS] Full log append failed:', err.message);
   }
 }
 
@@ -179,6 +189,100 @@ loadConfig();
 // Переопределяем пароль из переменной окружения если задана
 if (process.env.MC_PASSWORD) config.password = process.env.MC_PASSWORD;
 
+// ── Groq AI детектор ──────────────────────────────────────────
+const groq = process.env.GROQ_API_KEY
+  ? new Groq({ apiKey: process.env.GROQ_API_KEY })
+  : null;
+
+if (groq) console.log('[GROQ] AI детектор активен');
+else console.log('[GROQ] GROQ_API_KEY не задан, AI детектор отключён');
+
+// Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
+const groqCache = new Map();
+
+async function checkWithGroq(username, message, botLabel) {
+  if (!groq) return;
+  // Не проверяем короткие сообщения и команды
+  if (message.length < 6 || message.startsWith('/')) return;
+  // Не проверяем если мало слов
+  if (message.trim().split(/\s+/).length < 2) return;
+
+  const cacheKey = message.toLowerCase().trim();
+  if (groqCache.has(cacheKey)) {
+    const cached = groqCache.get(cacheKey);
+    if (cached) {
+      addPanelLog('action', `[${username}]: ${message} → ${cached} (AI)`, botLabel);
+      tgNotifyViolation(tgFormatted(username, message, cached, botLabel), username, message, botLabel);
+    }
+    return;
+  }
+
+  try {
+    const prompt = `Ты модератор Minecraft сервера CheatMine. Определи нарушает ли сообщение правила чата.
+
+Правила чата:
+2.1 — оскорбления игроков (мат, унижения, обзывательства, "лох", "дура", "дурак" и подобное, в т.ч. в вопросительной форме) → мут 30м-2ч
+2.2 — обход мута/бана с другого аккаунта → бан 1-3ч
+2.3 — переход на личную жизнь, оскорбление семьи (мать, отец, родственники) → мут до 10д
+2.4 — провокации (ez, easy, слился, иди нафиг, убейся и тп; оскорбление ≠ провокация) → мут 30-60м
+2.5 — попрошайничество (дай ресурсы, /gm 1, разбан/размут и тп) → мут 30м-1ч
+2.6 — продажа доната через /grant → бан навсегда
+2.7 — спам/флуд/капс (3+ одинаковых сообщения, 4+ слова капсом, реклама клана чаще 1р/мин) → мут 20-60м
+2.8 — выдавать себя за администрацию/модерацию → мут 1-5ч
+2.9 — разжигание расовой, религиозной, политической, национальной розни → бан 2-7д
+2.10 — введение в заблуждение игроков/персонала → мут 30-60м
+2.11 — обман персонала сервера → бан 1ч-1д
+2.12 — коммерческая деятельность на сервере → бан навсегда
+2.13 — реклама сторонних ресурсов/серверов (скам-ссылки → бан навсегда, обычная реклама → бан 1-5ч)
+2.14 — угрозы физической расправой игрокам → бан 5ч
+3.17 — оскорбление проекта CheatMine → бан 1-7д
+3.24 — оскорбление/провокация модерации → бан до 7д
+3.25 — разглашение личной информации (адреса, фото, IP, телефоны) → мут до 1д, бан до 10д
+3.29 — оскорбительные/провокационные названия кланов и варпов → бан до 5д
+
+Важно:
+- Реклама кланов/варпов разрешена (если не чаще 1р/мин для игроков)
+- Предупреждение — не угроза (п.2.14)
+- Если игрок матерится не в адрес кого-то конкретно — это всё равно нарушение 2.1
+- Учитывай обходы: замена букв цифрами/символами, пробелы между буквами, транслит
+
+Игрок: ${username}
+Сообщение: "${message}"
+
+Ответь ТОЛЬКО в формате JSON без лишнего текста:
+{"violation": true или false, "rule": "номер правила или null", "punishment": "наказание или null"}`;
+
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 80,
+      temperature: 0.1
+    });
+
+    const raw = completion.choices[0]?.message?.content?.trim() || '';
+    // Вытаскиваем JSON даже если модель добавила лишний текст
+    const jsonMatch = raw.match(/\{.*\}/s);
+    if (!jsonMatch) return;
+
+    const result = JSON.parse(jsonMatch[0]);
+
+    // Кэшируем на 5 минут
+    setTimeout(() => groqCache.delete(cacheKey), 5 * 60 * 1000);
+
+    if (result.violation && result.rule) {
+      const violation = `${result.rule} (AI) — ${result.punishment || 'нарушение'}`;
+      groqCache.set(cacheKey, violation);
+      addPanelLog('action', `[${username}]: ${message} → ${violation}`, botLabel);
+      tgNotifyViolation(tgFormatted(username, message, violation, botLabel), username, message, botLabel);
+    } else {
+      groqCache.set(cacheKey, null);
+    }
+  } catch (err) {
+    // Тихо проглатываем ошибки API чтобы не ломать основной поток
+    console.error('[GROQ] Ошибка:', err.message);
+  }
+}
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_CHAT_ID = -5346668750;
 const ADMIN_USERNAMES = ['WhyLuzarim'];
@@ -196,6 +300,77 @@ function isAdmin(msg) {
 
 function tgNotify(text) {
   if (tgBot) tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
+}
+
+// ── Контекст нарушения: 25 до + 25 после ─────────────────────
+const CHAT_BUFFER_SIZE = 25;
+const chatBuffer = []; // скользящее окно последних 25 сообщений
+
+function addToChatBuffer(botLabel, username, message) {
+  const now = new Date();
+  chatBuffer.push(`[${fmtDate(now)} ${fmtTime(now)}] [${botLabel}] ${username}: ${message}`);
+  if (chatBuffer.length > CHAT_BUFFER_SIZE) chatBuffer.shift();
+}
+
+// Ожидающие контекст нарушения: { before, violationLine, after[], resolve }
+const pendingContexts = [];
+
+function scheduleContextSend(before, violationLine) {
+  const after = [];
+  pendingContexts.push({ before, violationLine, after });
+  // Отправляем как только накопили 25 сообщений после нарушения
+  // (или через 3 минуты если чат тихий)
+  const send = () => {
+    const idx = pendingContexts.findIndex(p => p.violationLine === violationLine);
+    if (idx === -1) return;
+    const ctx = pendingContexts.splice(idx, 1)[0];
+    const lines = [
+      '═══ 25 сообщений ДО ═══',
+      ...ctx.before,
+      '',
+      '▶▶▶ НАРУШЕНИЕ ◀◀◀',
+      ctx.violationLine,
+      '',
+      '═══ 25 сообщений ПОСЛЕ ═══',
+      ...ctx.after
+    ].join('\n');
+    if (tgBot) {
+      const buf = Buffer.from(lines, 'utf8');
+      tgBot.sendDocument(GROUP_CHAT_ID, buf, {}, {
+        filename: 'context.txt',
+        contentType: 'text/plain'
+      }).catch(() => {});
+    }
+  };
+
+  // Таймер на 3 минуты если чат тихий
+  const timer = setTimeout(send, 3 * 60 * 1000);
+
+  // Следим за накоплением 25 сообщений после
+  pendingContexts[pendingContexts.length - 1]._timer = timer;
+  pendingContexts[pendingContexts.length - 1]._send = send;
+}
+
+function onChatMessageForContext(botLabel, username, message) {
+  const line = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
+  for (const ctx of pendingContexts) {
+    if (ctx.after.length < CHAT_BUFFER_SIZE) {
+      ctx.after.push(line);
+      if (ctx.after.length >= CHAT_BUFFER_SIZE) {
+        clearTimeout(ctx._timer);
+        ctx._send();
+      }
+    }
+  }
+}
+
+function tgNotifyViolation(text, username, message, botLabel) {
+  if (!tgBot) return;
+  tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
+  // Снимаем контекст до нарушения
+  const before = [...chatBuffer];
+  const violationLine = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
+  scheduleContextSend(before, violationLine);
 }
 
 function tgFormatted(username, message, rule, botLabel) {
@@ -375,6 +550,8 @@ function logChatMessage(botLabel, username, message) {
       if (t < cutoff) chatLogDedup.delete(k);
     }
   }
+  addToChatBuffer(botLabel, username, message);
+  onChatMessageForContext(botLabel, username, message);
   addPanelLog('chat', `${username}: ${message}`, botLabel, username);
 }
 
@@ -612,7 +789,10 @@ function checkViolations(username, message, botLabel) {
   if (violation) {
     const logText = `[${username}]: ${message} → ${violation}`;
     addPanelLog('action', logText, botLabel);
-    tgNotify(tgFormatted(username, message, violation, botLabel));
+    tgNotifyViolation(tgFormatted(username, message, violation, botLabel), username, message, botLabel);
+  } else {
+    // Словарь не сработал — отправляем на проверку AI
+    checkWithGroq(username, message, botLabel);
   }
 }
 
@@ -795,6 +975,14 @@ app.get('/', (req, res) => {
 
 app.get('/api/logs', (req, res) => {
   res.json(logs);
+});
+
+// Скачать полный вечный лог
+app.get('/api/logs/full', (req, res) => {
+  if (!fs.existsSync(FULL_LOG_PATH)) return res.status(404).send('Лог пуст');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="full_log.txt"');
+  fs.createReadStream(FULL_LOG_PATH).pipe(res);
 });
 
 // Вся история логов за все дни (кроме сегодняшнего — он приходит живым через сокет)
