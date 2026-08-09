@@ -281,7 +281,7 @@ async function checkWithAI(username, message, botLabel) {
     let raw = '';
 
     if (gemini) {
-      const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const model = gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
       const result = await model.generateContent(prompt);
       raw = result.response.text().trim();
     } else {
