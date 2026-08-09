@@ -10,12 +10,12 @@ const fs = require('fs');
 // Время в консоли (cmd)
 const _origLog = console.log;
 const _origError = console.error;
-function consoleTs() { return new Date().toLocaleTimeString('ru-RU', { timeZone: process.env.TZ || 'Asia/Yekaterinburg' }); }
+function consoleTs() { return new Date().toLocaleTimeString('ru-RU', { timeZone: TZ }); }
 console.log = (...args) => _origLog(`[${consoleTs()}]`, ...args);
 console.error = (...args) => _origError(`[${consoleTs()}]`, ...args);
 
 // Хелпер для форматирования даты/времени в нужной таймзоне
-const TZ = process.env.TZ || 'Asia/Yekaterinburg';
+const TZ = process.env.TZ || 'Etc/GMT-5';
 function fmtDate(d) { return d.toLocaleDateString('ru-RU', { timeZone: TZ }); }
 function fmtTime(d) { return d.toLocaleTimeString('ru-RU', { timeZone: TZ }); }
 const CONFIG_PATH = path.join(__dirname, 'config.json');
