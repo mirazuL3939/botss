@@ -303,7 +303,7 @@ function tgNotify(text) {
 }
 
 // ── Контекст нарушения: 25 до + 25 после ─────────────────────
-const CHAT_BUFFER_SIZE = 25;
+const CHAT_BUFFER_SIZE = 15;
 const chatBuffer = []; // скользящее окно последних 25 сообщений
 
 function addToChatBuffer(botLabel, username, message) {
@@ -324,22 +324,9 @@ function scheduleContextSend(before, violationLine) {
     const idx = pendingContexts.findIndex(p => p.violationLine === violationLine);
     if (idx === -1) return;
     const ctx = pendingContexts.splice(idx, 1)[0];
-    const lines = [
-      '═══ 25 сообщений ДО ═══',
-      ...ctx.before,
-      '',
-      '▶▶▶ НАРУШЕНИЕ ◀◀◀',
-      ctx.violationLine,
-      '',
-      '═══ 25 сообщений ПОСЛЕ ═══',
-      ...ctx.after
-    ].join('\n');
+    const text = buildContextText(ctx.before, ctx.violationLine, ctx.after);
     if (tgBot) {
-      const buf = Buffer.from(lines, 'utf8');
-      tgBot.sendDocument(GROUP_CHAT_ID, buf, {}, {
-        filename: 'context.txt',
-        contentType: 'text/plain'
-      }).catch(() => {});
+      tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
     }
   };
 
@@ -364,10 +351,41 @@ function onChatMessageForContext(botLabel, username, message) {
   }
 }
 
+function truncateLine(line, max = 80) {
+  return line.length > max ? line.slice(0, max - 1) + '…' : line;
+}
+
+function buildContextText(before, violationLine, after) {
+  const LIMIT = 3800; // запас под заголовки
+  const header1 = '— до —';
+  const header2 = '\n▶ НАРУШЕНИЕ ◀';
+  const header3 = '\n— после —';
+  const vLine = truncateLine(violationLine, 120);
+
+  const beforeTrunc = before.map(l => truncateLine(l));
+  const afterTrunc = after.map(l => truncateLine(l));
+
+  let text = `${header1}\n${beforeTrunc.join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.join('\n')}`;
+
+  // Если всё равно не влезает — обрезаем строки агрессивнее
+  if (text.length > LIMIT) {
+    const short = l => truncateLine(l, 50);
+    text = `${header1}\n${beforeTrunc.map(short).join('\n')}${header2}\n${vLine}${header3}\n${afterTrunc.map(short).join('\n')}`;
+  }
+
+  // Если всё ещё не влезает — берём меньше сообщений
+  if (text.length > LIMIT) {
+    const b = beforeTrunc.slice(-8).map(l => truncateLine(l, 50));
+    const a = afterTrunc.slice(0, 8).map(l => truncateLine(l, 50));
+    text = `${header1}\n${b.join('\n')}${header2}\n${vLine}${header3}\n${a.join('\n')}`;
+  }
+
+  return text;
+}
+
 function tgNotifyViolation(text, username, message, botLabel) {
   if (!tgBot) return;
   tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
-  // Снимаем контекст до нарушения
   const before = [...chatBuffer];
   const violationLine = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
   scheduleContextSend(before, violationLine);
