@@ -642,3 +642,43 @@ function renderRules() {
 /* ── Вкладка Триггеры ────────────────────── */
 const btnViewRules = $('btnViewRules');
 if (btnViewRules) btnViewRules.addEventListener('click', () => switchView('rules'));
+
+const newTriggerWord = $('newTriggerWord');
+const newTriggerRuleSelect = $('newTriggerRuleSelect');
+const addTriggerBtn = $('addTriggerBtn');
+
+if (newTriggerRuleSelect) {
+  Object.entries(RULE_LABELS).forEach(([id, label]) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = `${id} — ${label}`;
+    newTriggerRuleSelect.appendChild(opt);
+  });
+}
+
+if (addTriggerBtn) {
+  addTriggerBtn.addEventListener('click', () => {
+    const word = newTriggerWord.value.trim().toLowerCase();
+    const ruleId = newTriggerRuleSelect.value;
+    if (!word || !ruleId) return;
+
+    const rules = state.config.rules || {};
+    if (!rules[ruleId]) return;
+    
+    if (rules[ruleId].words.includes(word)) {
+      showToast('Слово уже есть в этом правиле!');
+      return;
+    }
+
+    rules[ruleId].words.push(word);
+    socket.emit('update_rules', { [ruleId]: { words: rules[ruleId].words } });
+    
+    newTriggerWord.value = '';
+    showToast(`✅ Слово добавлено в правило ${ruleId}`);
+    renderRules(); // перерисовываем карточки
+  });
+  
+  newTriggerWord.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addTriggerBtn.click();
+  });
+}

@@ -101,7 +101,17 @@
     </div>
 
     <section class="rules-view" id="viewRules" hidden>
-      <div id="rulesContainer" class="rules-container"></div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Быстрое добавление триггера</h2>
+        </div>
+        <div class="chat-send-row" style="margin-top: 12px; gap: 8px;">
+          <input id="newTriggerWord" class="chat-send-input" placeholder="Введите слово..." autocomplete="off" spellcheck="false" style="flex: 1;" />
+          <select id="newTriggerRuleSelect" class="chat-bot-select"></select>
+          <button id="addTriggerBtn" type="button" class="ghost-btn">Добавить</button>
+        </div>
+      </div>
+      <div id="rulesContainer" class="rules-container" style="margin-top: 16px;"></div>
     </section>
 
     <section class="games-view" id="viewGames" hidden>
