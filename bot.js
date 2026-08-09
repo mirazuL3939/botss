@@ -7,6 +7,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Время в консоли (cmd)
 const _origLog = console.log;
@@ -189,13 +190,17 @@ loadConfig();
 // Переопределяем пароль из переменной окружения если задана
 if (process.env.MC_PASSWORD) config.password = process.env.MC_PASSWORD;
 
-// ── Groq AI детектор ──────────────────────────────────────────
+// ── Gemini AI детектор ────────────────────────────────────────
+const gemini = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
 const groq = process.env.GROQ_API_KEY
   ? new Groq({ apiKey: process.env.GROQ_API_KEY })
   : null;
 
-if (groq) console.log('[GROQ] AI детектор активен');
-else console.log('[GROQ] GROQ_API_KEY не задан, AI детектор отключён');
+if (gemini) console.log('[GEMINI] AI детектор активен');
+else if (groq) console.log('[GROQ] AI детектор активен');
+else console.log('[AI] Ключи не заданы, AI детектор отключён');
 
 // Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
 const groqCache = new Map();
@@ -209,7 +214,7 @@ async function processGroqQueue() {
   groqProcessing = true;
   const { username, message, botLabel } = groqQueue.shift();
   try {
-    await checkWithGroq(username, message, botLabel);
+    await checkWithAI(username, message, botLabel);
   } catch(e) {}
   groqProcessing = false;
   if (groqQueue.length > 0) {
@@ -218,14 +223,13 @@ async function processGroqQueue() {
 }
 
 function enqueueGroq(username, message, botLabel) {
-  // Не накапливаем очередь больше 10 — старые неважны
   if (groqQueue.length >= 10) groqQueue.shift();
   groqQueue.push({ username, message, botLabel });
   if (!groqProcessing) setTimeout(processGroqQueue, GROQ_MIN_INTERVAL);
 }
 
-async function checkWithGroq(username, message, botLabel) {
-  if (!groq) return;
+async function checkWithAI(username, message, botLabel) {
+  if (!gemini && !groq) return;
   if (message.length < 8 || message.startsWith('/')) return;
 
   const cacheKey = message.toLowerCase().trim();
@@ -238,8 +242,7 @@ async function checkWithGroq(username, message, botLabel) {
     return;
   }
 
-  try {
-    const prompt = `Ты модератор Minecraft сервера CheatMine. Определи нарушает ли сообщение правила чата.
+  const prompt = `Ты модератор Minecraft сервера CheatMine. Определи нарушает ли сообщение правила чата.
 
 Правила чата:
 2.1 — оскорбления игроков (мат, унижения, обзывательства, "лох", "дура", "дурак" и подобное, в т.ч. в вопросительной форме) → мут 30м-2ч
@@ -274,21 +277,27 @@ async function checkWithGroq(username, message, botLabel) {
 Ответь ТОЛЬКО в формате JSON без лишнего текста:
 {"violation": true или false, "rule": "номер правила или null", "punishment": "наказание или null"}`;
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 80,
-      temperature: 0.1
-    });
+  try {
+    let raw = '';
 
-    const raw = completion.choices[0]?.message?.content?.trim() || '';
-    // Вытаскиваем JSON даже если модель добавила лишний текст
-    const jsonMatch = raw.match(/\{.*\}/s);
+    if (gemini) {
+      const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const result = await model.generateContent(prompt);
+      raw = result.response.text().trim();
+    } else {
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 80,
+        temperature: 0.1
+      });
+      raw = completion.choices[0]?.message?.content?.trim() || '';
+    }
+
+    const jsonMatch = raw.match(/\{.*?\}/s);
     if (!jsonMatch) return;
 
     const result = JSON.parse(jsonMatch[0]);
-
-    // Кэшируем на 5 минут
     setTimeout(() => groqCache.delete(cacheKey), 5 * 60 * 1000);
 
     if (result.violation && result.rule) {
@@ -300,8 +309,7 @@ async function checkWithGroq(username, message, botLabel) {
       groqCache.set(cacheKey, null);
     }
   } catch (err) {
-    // Тихо проглатываем ошибки API чтобы не ломать основной поток
-    console.error('[GROQ] Ошибка:', err.message);
+    console.error('[AI] Ошибка:', err.message);
   }
 }
 
