@@ -622,3 +622,61 @@ select {
   .game-stage { min-height: 360px; padding: 10px; }
   .ms-cell { width: 28px; height: 28px; border-radius: 6px; }
 }
+
+/* ── Панель отправки в чат ─────────────── */
+.chat-send-card {
+  margin-bottom: 0;
+}
+
+.chat-send-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-send-row select {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+  cursor: pointer;
+  outline: none;
+}
+
+.chat-send-row select:focus {
+  border-color: var(--border-strong);
+}
+
+.chat-send-row input {
+  flex: 1;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.chat-send-row input:focus {
+  border-color: var(--border-strong);
+}
+
+.chat-send-row button {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.chat-send-row button:hover {
+  background: rgba(201, 211, 223, 0.2);
+}

@@ -19,6 +19,9 @@ const els = {
   logSearch: $('logSearch'),
   logCount: $('logCount'),
   logs: $('logs'),
+  chatBotSelect: $('chatBotSelect'),
+  chatSendInput: $('chatSendInput'),
+  chatSendBtn: $('chatSendBtn'),
   openLinksPanel: $('openLinksPanel'),
   linksModal: $('linksModal'),
   linksList: $('linksList'),
@@ -394,6 +397,37 @@ function renderLogs() {
 
 bindPlayerFilterControls();
 
+/* ── Отправка сообщений от бота ──────────── */
+
+function renderChatBotSelect() {
+  const prev = els.chatBotSelect.value;
+  els.chatBotSelect.innerHTML = '';
+  state.bots.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.username;
+    opt.textContent = `${b.label || b.username} (${b.status === 'online' ? '🟢' : '🔴'})`;
+    opt.disabled = b.status !== 'online';
+    els.chatBotSelect.appendChild(opt);
+  });
+  if (prev && [...els.chatBotSelect.options].some(o => o.value === prev)) {
+    els.chatBotSelect.value = prev;
+  }
+}
+
+function sendChatMessage() {
+  const text = els.chatSendInput.value.trim();
+  const username = els.chatBotSelect.value;
+  if (!text || !username) return;
+  socket.emit('send_command', { username, text });
+  showToast(`Отправлено от ${username}: ${text}`);
+  els.chatSendInput.value = '';
+}
+
+els.chatSendBtn.addEventListener('click', sendChatMessage);
+els.chatSendInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendChatMessage();
+});
+
 els.logSearch.addEventListener('input', () => {
   state.logSearch = els.logSearch.value;
   renderLogs();
@@ -463,11 +497,13 @@ socket.on('init', (payload) => {
   renderLogTabs();
   renderPlayerTabs();
   renderLogs();
+  renderChatBotSelect();
 });
 
 socket.on('status', (data) => {
   state.bots = data;
   renderLogTabs();
+  renderChatBotSelect();
 });
 
 socket.on('log', (entry) => {

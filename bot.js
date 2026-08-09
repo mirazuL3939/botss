@@ -173,6 +173,9 @@ function loadConfig() {
 }
 loadConfig();
 
+// Переопределяем пароль из переменной окружения если задана
+if (process.env.MC_PASSWORD) config.password = process.env.MC_PASSWORD;
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_CHAT_ID = -5346668750;
 const ADMIN_USERNAMES = ['WhyLuzarim'];
@@ -193,9 +196,9 @@ function tgNotify(text) {
 }
 
 function tgFormatted(username, message, rule, botLabel) {
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const date = now.toLocaleDateString('ru-RU', { timeZone: 'UTC' });
-  const time = now.toLocaleTimeString('ru-RU', { timeZone: 'UTC' });
+  const now = new Date();
+  const date = now.toLocaleDateString('ru-RU');
+  const time = now.toLocaleTimeString('ru-RU');
   const ruleNum = rule.match(/^[\d.]+/)?.[0] || '';
   const desc = rule.replace(/^[\d.]+\s*/, '').replace(/\s*—.*$/, '');
   const punishment = rule.match(/—\s*(.+)$/)?.[1] || '';
