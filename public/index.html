@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ModerBot — Панель</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="logo"><span class="logo-mark">◈</span> ModerBot</div>
+        <div id="serverLine" class="server-line">—</div>
+      </div>
+      <nav class="nav-tabs">
+        <button id="btnViewMain" type="button" class="active">Панель</button>
+        <button id="btnViewGames" type="button">Игры</button>
+      </nav>
+      <div class="topbar-right">
+        <span id="clock" class="clock">--:--:--</span>
+        <span id="socketState" class="conn-pill">connecting</span>
+      </div>
+    </header>
+
+    <main class="layout" id="viewMain">
+      <section class="controls">
+        <div class="card">
+          <div class="card-head">
+            <h2>IP сервера</h2>
+            <span id="ipState" class="badge ok">saved</span>
+          </div>
+          <input id="hostInput" placeholder="eu.cheatmine.net" spellcheck="false" autocomplete="off" />
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Сообщение в Telegram</h2>
+            <span id="tgState" class="badge ok">saved</span>
+          </div>
+          <textarea id="tgTemplate" rows="7" spellcheck="false"></textarea>
+          <div class="hint">{emoji} {date} {time} {mode} {player} {rule} {desc} {message} {punishment}</div>
+        </div>
+      </section>
+
+      <section class="card logs-card">
+        <div class="logs-toolbar">
+          <div class="log-filter-block">
+            <div class="log-filter-row">
+              <span class="filter-label">Источники</span>
+              <div id="logTabs" class="log-tabs"></div>
+            </div>
+            <div class="log-filter-row">
+              <span class="filter-label">Игроки</span>
+              <div class="player-filter">
+                <div id="playerFilterChips" class="player-filter-chips"></div>
+                <div class="player-filter-add">
+                  <input id="playerFilterInput" placeholder="Ник игрока" autocomplete="off" spellcheck="false" />
+                  <button id="addPlayerFilter" type="button">+</button>
+                  <button id="clearPlayerFilters" type="button">Все</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="search-wrap">
+            <span class="search-icon">⌕</span>
+            <input id="logSearch" placeholder="Поиск по слову, нику, дате или времени…" autocomplete="off" />
+          </div>
+          <div class="logs-actions">
+            <button id="openLinksPanel" type="button" class="ghost-btn">Ссылки</button>
+            <span id="logCount" class="badge">0</span>
+          </div>
+        </div>
+        <div id="logs" class="logs"></div>
+      </section>
+    </main>
+
+    <div id="linksModal" class="links-modal" hidden>
+      <div class="links-panel" role="dialog" aria-modal="true" aria-labelledby="linksTitle">
+        <div class="links-header">
+          <h2 id="linksTitle">Ссылки для проверки</h2>
+          <button id="closeLinksModal" type="button" class="close-btn" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="links-toolbar">
+          <button id="copyAllLinks" type="button" class="ghost-btn">Копировать все</button>
+        </div>
+        <div id="linksList" class="links-list"></div>
+      </div>
+    </div>
+
+    <section class="games-view" id="viewGames" hidden>
+      <div class="card games-card">
+        <div class="games-toolbar">
+          <div id="gameTabs" class="log-tabs">
+            <button data-game="snake" type="button" class="active">🐍 Змейка</button>
+            <button data-game="mines" type="button">💣 Сапёр</button>
+            <button data-game="dino" type="button">🦖 Динозаврик</button>
+          </div>
+          <span id="gameInfo" class="badge">—</span>
+          <button id="gameRestart" type="button" class="ghost-btn">↻ заново</button>
+        </div>
+        <div id="gameStage" class="game-stage"></div>
+        <div id="gameHint" class="hint game-hint"></div>
+      </div>
+      <div class="card fx-card">
+        <div class="card-head">
+          <h2>Летающие объекты</h2>
+          <span id="fxPresetName" class="badge">code</span>
+        </div>
+        <div class="fx-controls">
+          <label class="check-row">
+            <input id="fxEnabled" type="checkbox" checked />
+            <span>Показывать летающие элементы</span>
+          </label>
+          <label>
+            <span>Набор</span>
+            <select id="fxPreset">
+              <option value="code">Код</option>
+              <option value="moderation">Модерация</option>
+              <option value="minecraft">Minecraft</option>
+              <option value="symbols">Символы</option>
+              <option value="mixed">Микс</option>
+            </select>
+          </label>
+          <label>
+            <span>Палитра</span>
+            <select id="fxPalette">
+              <option value="mint">Сталь</option>
+              <option value="neon">Серый неон</option>
+              <option value="warm">Титан</option>
+              <option value="ice">Хром</option>
+            </select>
+          </label>
+          <label>
+            <span>Плотность</span>
+            <input id="fxDensity" type="range" min="10" max="90" value="46" />
+          </label>
+          <label>
+            <span>Размер</span>
+            <input id="fxSize" type="range" min="8" max="24" value="14" />
+          </label>
+          <label>
+            <span>Скорость</span>
+            <input id="fxSpeed" type="range" min="50" max="180" value="100" />
+          </label>
+          <label class="check-row">
+            <input id="fxRepel" type="checkbox" checked />
+            <span>Отталкивать курсором</span>
+          </label>
+          <label class="check-row">
+            <input id="fxGlow" type="checkbox" checked />
+            <span>Свечение</span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/effects.js"></script>
+    <script src="/games.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
