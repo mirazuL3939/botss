@@ -539,6 +539,7 @@ socket.on('init', (payload) => {
   renderPlayerTabs();
   renderLogs();
   renderChatBotSelect();
+  if (typeof updateQuickAddExisting === 'function') updateQuickAddExisting();
 });
 
 socket.on('status', (data) => {
@@ -646,6 +647,18 @@ if (btnViewRules) btnViewRules.addEventListener('click', () => switchView('rules
 const newTriggerWord = $('newTriggerWord');
 const newTriggerRuleSelect = $('newTriggerRuleSelect');
 const addTriggerBtn = $('addTriggerBtn');
+const quickAddExisting = $('quickAddExisting');
+
+function updateQuickAddExisting() {
+  if (!quickAddExisting || !newTriggerRuleSelect) return;
+  const ruleId = newTriggerRuleSelect.value;
+  const rules = state.config.rules || {};
+  if (rules[ruleId] && rules[ruleId].words && rules[ruleId].words.length > 0) {
+    quickAddExisting.textContent = 'Уже есть: ' + rules[ruleId].words.join(', ');
+  } else {
+    quickAddExisting.textContent = 'Пока нет слов в этом правиле';
+  }
+}
 
 if (newTriggerRuleSelect) {
   Object.entries(RULE_LABELS).forEach(([id, label]) => {
@@ -654,6 +667,7 @@ if (newTriggerRuleSelect) {
     opt.textContent = `${id} — ${label}`;
     newTriggerRuleSelect.appendChild(opt);
   });
+  newTriggerRuleSelect.addEventListener('change', updateQuickAddExisting);
 }
 
 if (addTriggerBtn) {
@@ -676,6 +690,7 @@ if (addTriggerBtn) {
     newTriggerWord.value = '';
     showToast(`✅ Слово добавлено в правило ${ruleId}`);
     renderRules(); // перерисовываем карточки
+    updateQuickAddExisting(); // обновляем текст подсказки
   });
   
   newTriggerWord.addEventListener('keydown', (e) => {
