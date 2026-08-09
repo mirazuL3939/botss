@@ -199,13 +199,17 @@ else console.log('[GROQ] GROQ_API_KEY не задан, AI детектор от�
 
 // Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
 const groqCache = new Map();
+let groqLastCall = 0;
+const GROQ_MIN_INTERVAL = 2000; // не чаще раза в 2 секунды
 
 async function checkWithGroq(username, message, botLabel) {
   if (!groq) return;
   // Не проверяем короткие сообщения и команды
-  if (message.length < 6 || message.startsWith('/')) return;
-  // Не проверяем если мало слов
-  if (message.trim().split(/\s+/).length < 2) return;
+  if (message.length < 8 || message.startsWith('/')) return;
+  // Троттлинг — не чаще раза в 2 секунды
+  const now = Date.now();
+  if (now - groqLastCall < GROQ_MIN_INTERVAL) return;
+  groqLastCall = now;
 
   const cacheKey = message.toLowerCase().trim();
   if (groqCache.has(cacheKey)) {
