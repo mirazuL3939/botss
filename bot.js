@@ -937,7 +937,12 @@ io.on('connection', (socket) => {
     const { username, text } = payload || {};
     if (!text) return;
     const bot = activeBots.find(b => b.username === username);
-    if (bot?.player) bot.chat(text);
+    if (bot?.player) {
+      bot.chat(text);
+      socket.emit('send_command_result', { success: true, username, text });
+    } else {
+      socket.emit('send_command_result', { success: false, reason: 'Бот оффлайн' });
+    }
   });
 
   socket.on('toggle_ci', (payload) => {

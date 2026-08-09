@@ -417,9 +417,10 @@ function renderChatBotSelect() {
 function sendChatMessage() {
   const text = els.chatSendInput.value.trim();
   const username = els.chatBotSelect.value;
-  if (!text || !username) return;
+  if (!text) { showToast('Введите сообщение'); return; }
+  if (!username) { showToast('Нет доступных ботов'); return; }
+  if (!socket.connected) { showToast('Нет соединения с сервером'); return; }
   socket.emit('send_command', { username, text });
-  showToast(`Отправлено от ${username}: ${text}`);
   els.chatSendInput.value = '';
 }
 
@@ -517,4 +518,9 @@ socket.on('clearLogs', () => {
   state.logs = []; // чистим только сегодняшние, история прошлых дней остаётся
   renderPlayerTabs();
   renderLogs();
+});
+
+socket.on('send_command_result', (data) => {
+  if (data.success) showToast(`✅ Отправлено (${data.username}): ${data.text}`);
+  else showToast(`❌ Не отправлено: ${data.reason || 'бот оффлайн'}`);
 });

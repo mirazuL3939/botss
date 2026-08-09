@@ -627,12 +627,14 @@ select {
 .chat-send-card {
   padding: 10px 12px;
   grid-column: 1 / -1;
+  overflow: visible;
 }
 
 .chat-send-row {
   display: flex;
   gap: 8px;
   align-items: center;
+  width: 100%;
 }
 
 .chat-bot-select {
@@ -645,6 +647,7 @@ select {
   cursor: pointer;
   outline: none;
   flex-shrink: 0;
+  width: 120px;
 }
 
 .chat-bot-select:focus {
