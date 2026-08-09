@@ -983,7 +983,10 @@ function startBots() {
 //Веб серв аштимиель кароч
 const app = express();
 const server = http.createServer(app);
-io = new Server(server);
+io = new Server(server, {
+  cors: { origin: '*' },
+  transports: ['websocket', 'polling']
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());

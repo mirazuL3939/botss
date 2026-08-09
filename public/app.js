@@ -1,6 +1,6 @@
 /* global io */
 
-const socket = io();
+const socket = io({ transports: ['websocket'] });
 const $ = (id) => document.getElementById(id);
 
 const els = {
