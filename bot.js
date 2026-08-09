@@ -307,48 +307,45 @@ function tgNotify(text) {
   if (tgBot) tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
 }
 
-// ── Контекст нарушения: 25 до + 25 после ─────────────────────
+// ── Контекст нарушения: 15 до + 15 после ─────────────────────
 const CHAT_BUFFER_SIZE = 10;
-const chatBuffer = []; // скользящее окно последних 25 сообщений
+const chatBuffers = new Map(); // буфер на каждый botLabel отдельно
 
 function addToChatBuffer(botLabel, username, message) {
+  if (!chatBuffers.has(botLabel)) chatBuffers.set(botLabel, []);
+  const buf = chatBuffers.get(botLabel);
   const now = new Date();
-  chatBuffer.push(`[${fmtDate(now)} ${fmtTime(now)}] [${botLabel}] ${username}: ${message}`);
-  if (chatBuffer.length > CHAT_BUFFER_SIZE) chatBuffer.shift();
+  buf.push(`[${fmtTime(now)}] [${botLabel}] ${username}: ${message}`);
+  if (buf.length > 15) buf.shift();
 }
 
-// Ожидающие контекст нарушения: { before, violationLine, after[], resolve }
+// Ожидающие контекст нарушения: { botLabel, before, violationLine, after[] }
 const pendingContexts = [];
 
-function scheduleContextSend(before, violationLine) {
+function scheduleContextSend(before, violationLine, botLabel) {
   const after = [];
-  pendingContexts.push({ before, violationLine, after });
-  // Отправляем как только накопили 25 сообщений после нарушения
-  // (или через 3 минуты если чат тихий)
+  const ctx = { before, violationLine, botLabel, after };
+
   const send = () => {
-    const idx = pendingContexts.findIndex(p => p.violationLine === violationLine);
+    const idx = pendingContexts.indexOf(ctx);
     if (idx === -1) return;
-    const ctx = pendingContexts.splice(idx, 1)[0];
+    pendingContexts.splice(idx, 1);
     const text = buildContextText(ctx.before, ctx.violationLine, ctx.after);
-    if (tgBot) {
-      tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
-    }
+    if (tgBot) tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
   };
 
-  // Таймер на 1 минуту если чат тихий
-  const timer = setTimeout(send, 60 * 1000);
-
-  // Следим за накоплением 25 сообщений после
-  pendingContexts[pendingContexts.length - 1]._timer = timer;
-  pendingContexts[pendingContexts.length - 1]._send = send;
+  ctx._timer = setTimeout(send, 60 * 1000);
+  ctx._send = send;
+  pendingContexts.push(ctx);
 }
 
 function onChatMessageForContext(botLabel, username, message) {
   const line = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
   for (const ctx of pendingContexts) {
-    if (ctx.after.length < CHAT_BUFFER_SIZE) {
+    if (ctx.botLabel !== botLabel) continue;
+    if (ctx.after.length < 15) {
       ctx.after.push(line);
-      if (ctx.after.length >= CHAT_BUFFER_SIZE) {
+      if (ctx.after.length >= 15) {
         clearTimeout(ctx._timer);
         ctx._send();
       }
@@ -391,9 +388,9 @@ function buildContextText(before, violationLine, after) {
 function tgNotifyViolation(text, username, message, botLabel) {
   if (!tgBot) return;
   tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
-  const before = [...chatBuffer];
+  const before = [...(chatBuffers.get(botLabel) || [])];
   const violationLine = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
-  scheduleContextSend(before, violationLine);
+  scheduleContextSend(before, violationLine, botLabel);
 }
 
 function tgFormatted(username, message, rule, botLabel) {
