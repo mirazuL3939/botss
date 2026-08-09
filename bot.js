@@ -200,7 +200,7 @@ else console.log('[GROQ] GROQ_API_KEY не задан, AI детектор от�
 // Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
 const groqCache = new Map();
 let groqLastCall = 0;
-const GROQ_MIN_INTERVAL = 5000; // не чаще раза в 5 секунд
+const GROQ_MIN_INTERVAL = 30000; // не чаще раза в 30 секунд
 const groqQueue = []; // очередь запросов
 let groqProcessing = false;
 
@@ -275,7 +275,7 @@ async function checkWithGroq(username, message, botLabel) {
 {"violation": true или false, "rule": "номер правила или null", "punishment": "наказание или null"}`;
 
     const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'llama-3.3-70b-specdec',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 80,
       temperature: 0.1
