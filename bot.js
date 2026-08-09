@@ -205,7 +205,7 @@ else console.log('[AI] Ключи не заданы, AI детектор отк�
 // Кэш чтобы не спрашивать Groq дважды про одинаковые сообщения
 const groqCache = new Map();
 let groqLastCall = 0;
-const GROQ_MIN_INTERVAL = 30000; // не чаще раза в 30 секунд
+const GROQ_MIN_INTERVAL = 60000; // не чаще раза в 60 секунд
 const groqQueue = []; // очередь запросов
 let groqProcessing = false;
 
@@ -230,7 +230,7 @@ function enqueueGroq(username, message, botLabel) {
 
 async function checkWithAI(username, message, botLabel) {
   if (!gemini && !groq) return;
-  if (message.length < 8 || message.startsWith('/')) return;
+  if (message.length < 15 || message.startsWith('/')) return;
 
   const cacheKey = message.toLowerCase().trim();
   if (groqCache.has(cacheKey)) {
@@ -344,25 +344,8 @@ function addToChatBuffer(botLabel, username, message) {
   if (buf.length > 15) buf.shift();
 }
 
-// Ожидающие контекст нарушения: { botLabel, before, violationLine, after[] }
+// Ожидающие контекст нарушения
 const pendingContexts = [];
-
-function scheduleContextSend(before, violationLine, botLabel) {
-  const after = [];
-  const ctx = { before, violationLine, botLabel, after };
-
-  const send = () => {
-    const idx = pendingContexts.indexOf(ctx);
-    if (idx === -1) return;
-    pendingContexts.splice(idx, 1);
-    const text = buildContextText(ctx.before, ctx.violationLine, ctx.after);
-    if (tgBot) tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
-  };
-
-  ctx._timer = setTimeout(send, 60 * 1000);
-  ctx._send = send;
-  pendingContexts.push(ctx);
-}
 
 function onChatMessageForContext(botLabel, username, message) {
   const line = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
@@ -410,12 +393,29 @@ function buildContextText(before, violationLine, after) {
   return text;
 }
 
-function tgNotifyViolation(text, username, message, botLabel) {
+function tgNotifyViolation(violationText, username, message, botLabel) {
   if (!tgBot) return;
-  tgBot.sendMessage(GROUP_CHAT_ID, text).catch(() => {});
   const before = [...(chatBuffers.get(botLabel) || [])];
   const violationLine = `[${fmtTime(new Date())}] [${botLabel}] ${username}: ${message}`;
-  scheduleContextSend(before, violationLine, botLabel);
+
+  // Собираем после и шлём одним сообщением
+  const after = [];
+  const ctx = { before, violationLine, botLabel, after, violationText };
+
+  const send = () => {
+    const idx = pendingContexts.indexOf(ctx);
+    if (idx !== -1) pendingContexts.splice(idx, 1);
+    const contextBlock = buildContextText(ctx.before, ctx.violationLine, ctx.after);
+    const full = `${ctx.violationText}\n\n${contextBlock}`;
+    // Если не влезает — обрезаем до 4096
+    tgBot.sendMessage(GROUP_CHAT_ID, full.slice(0, 4096)).catch(() => {});
+  };
+
+  ctx._timer = setTimeout(send, 60 * 1000);
+  ctx._send = send;
+  pendingContexts.push(ctx);
+
+  addPanelLog('action', `[${username}]: ${message}`, botLabel);
 }
 
 function tgFormatted(username, message, rule, botLabel) {
@@ -835,9 +835,6 @@ function checkViolations(username, message, botLabel) {
     const logText = `[${username}]: ${message} → ${violation}`;
     addPanelLog('action', logText, botLabel);
     tgNotifyViolation(tgFormatted(username, message, violation, botLabel), username, message, botLabel);
-  } else {
-    // Словарь не сработал — отправляем в очередь AI
-    enqueueGroq(username, message, botLabel);
   }
 }
 
