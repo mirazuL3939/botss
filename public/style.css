@@ -626,6 +626,7 @@ select {
 /* ── Панель отправки в чат ─────────────── */
 .chat-send-card {
   padding: 10px 12px;
+  grid-column: 1 / -1;
 }
 
 .chat-send-row {
