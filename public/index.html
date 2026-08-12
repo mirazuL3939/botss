@@ -14,7 +14,6 @@
       </div>
       <nav class="nav-tabs">
         <button id="btnViewMain" type="button" class="active">Панель</button>
-        <button id="btnViewRules" type="button">Триггеры</button>
         <button id="btnViewGames" type="button">Игры</button>
       </nav>
       <div class="topbar-right">
@@ -78,42 +77,17 @@
             <input id="logSearch" placeholder="Поиск по слову, нику, дате или времени…" autocomplete="off" />
           </div>
           <div class="logs-actions">
-            <button id="openLinksPanel" type="button" class="ghost-btn">🔗 Ссылки</button>
-            <a href="/api/logs/full" download class="ghost-btn" id="downloadFullLog">⬇ Полный лог</a>
+            <label class="log-date-control">
+              <span>Дата</span>
+              <input id="logDate" type="date" aria-label="Дата логов" />
+            </label>
+            <button id="downloadDayLog" type="button" class="ghost-btn" title="Скачать логи за выбранный день">↓ Скачать</button>
             <span id="logCount" class="badge">0</span>
           </div>
         </div>
         <div id="logs" class="logs"></div>
       </section>
     </main>
-
-    <div id="linksModal" class="links-modal" hidden>
-      <div class="links-panel" role="dialog" aria-modal="true" aria-labelledby="linksTitle">
-        <div class="links-header">
-          <h2 id="linksTitle">Ссылки для проверки</h2>
-          <button id="closeLinksModal" type="button" class="close-btn" aria-label="Закрыть">✕</button>
-        </div>
-        <div class="links-toolbar">
-          <button id="copyAllLinks" type="button" class="ghost-btn">Копировать все</button>
-        </div>
-        <div id="linksList" class="links-list"></div>
-      </div>
-    </div>
-
-    <section class="rules-view" id="viewRules" hidden>
-      <div class="card">
-        <div class="card-head">
-          <h2>Быстрое добавление триггера</h2>
-        </div>
-        <div class="chat-send-row" style="margin-top: 12px; gap: 8px;">
-          <input id="newTriggerWord" class="chat-send-input" placeholder="Введите слово..." autocomplete="off" spellcheck="false" style="flex: 1;" />
-          <select id="newTriggerRuleSelect" class="chat-bot-select"></select>
-          <button id="addTriggerBtn" type="button" class="ghost-btn">Добавить</button>
-        </div>
-        <div id="quickAddExisting" class="hint" style="margin-top: 8px; font-size: 0.85rem; max-height: 60px; overflow-y: auto;"></div>
-      </div>
-      <div id="rulesContainer" class="rules-container" style="margin-top: 16px;"></div>
-    </section>
 
     <section class="games-view" id="viewGames" hidden>
       <div class="card games-card">

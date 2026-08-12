@@ -7,6 +7,8 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 
+const TZ = process.env.TZ || 'Europe/Moscow';
+
 // Время в консоли (cmd)
 const _origLog = console.log;
 const _origError = console.error;
@@ -14,46 +16,78 @@ function consoleTs() { return new Date().toLocaleTimeString('ru-RU', { timeZone:
 console.log = (...args) => _origLog(`[${consoleTs()}]`, ...args);
 console.error = (...args) => _origError(`[${consoleTs()}]`, ...args);
 
-// Хелпер для форматирования даты/времени в нужной таймзоне
-const TZ = process.env.TZ || 'Europe/Moscow';
+// Хелперы для даты и хранения. DATA_DIR на Render должен указывать на persistent disk.
 function fmtDate(d) { return d.toLocaleDateString('ru-RU', { timeZone: TZ }); }
 function fmtTime(d) { return d.toLocaleTimeString('ru-RU', { timeZone: TZ }); }
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-const LOGS_DIR = process.env.LOGS_DIR
-  ? path.join(process.env.LOGS_DIR, 'logs')
-  : path.join(__dirname, 'logs');
-const FULL_LOG_PATH = path.join(LOGS_DIR, '_full.txt'); // полный вечный лог
+const DATA_DIR = path.resolve(process.env.DATA_DIR || __dirname);
+const CONFIG_PATH = path.resolve(process.env.CONFIG_PATH || path.join(DATA_DIR, 'config.json'));
+const CONFIG_TEMPLATE_PATH = path.join(__dirname, 'config.example.json');
+const LOGS_DIR = path.resolve(process.env.LOGS_DIR || path.join(DATA_DIR, 'logs'));
 
-if (!fs.existsSync(LOGS_DIR)) {
-  fs.mkdirSync(LOGS_DIR, { recursive: true });
+fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+fs.mkdirSync(LOGS_DIR, { recursive: true });
+
+const datePartsFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+});
+
+function getDateParts(date = new Date()) {
+  const parts = datePartsFormatter.formatToParts(date);
+  return Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
 }
 
 function getLogFileName(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  const { year, month, day } = getDateParts(date);
+  return `${year}-${month}-${day}`;
 }
 
-function getLogFilePath(date = new Date(), extension = '.json') {
-  return path.join(LOGS_DIR, `${getLogFileName(date)}${extension}`);
+function getLogFilePath(dateOrDay = new Date(), extension = '.jsonl') {
+  const day = typeof dateOrDay === 'string' ? dateOrDay : getLogFileName(dateOrDay);
+  return path.join(LOGS_DIR, `${day}${extension}`);
 }
 
-function loadTodayLogs() {
-  const filePath = getLogFilePath(new Date(), '.json');
-  if (fs.existsSync(filePath)) {
-    try {
-      const raw = fs.readFileSync(filePath, 'utf8');
-      const data = JSON.parse(raw);
-      return Array.isArray(data) ? data : [];
-    } catch { return []; }
+function isLogDay(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function readJsonLogFile(day) {
+  const filePath = getLogFilePath(day, '.json');
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return Array.isArray(data) ? data.filter(entry => entry && typeof entry === 'object') : [];
+  } catch {
+    return [];
   }
-  return [];
 }
 
-function saveTodayLogs(logsArray) {
-  const filePath = getLogFilePath(new Date(), '.json');
-  fs.writeFileSync(filePath, JSON.stringify(logsArray, null, 2), 'utf8');
+function readJsonlLogFile(day) {
+  const filePath = getLogFilePath(day, '.jsonl');
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    return fs.readFileSync(filePath, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .flatMap(line => {
+        try {
+          const entry = JSON.parse(line);
+          return entry && typeof entry === 'object' ? [entry] : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+function loadLogsForDay(day) {
+  if (!isLogDay(day)) return [];
+  // Старые JSON-файлы остаются доступными, а новые записи дописываются в JSONL.
+  return [...readJsonLogFile(day), ...readJsonlLogFile(day)];
 }
 
 function formatTextLogEntry(entry) {
@@ -62,8 +96,10 @@ function formatTextLogEntry(entry) {
   const time = entry?.time || fmtTime(now);
   const bot = entry?.bot || 'system';
   const type = entry?.type || 'info';
-  const user = entry?.username ? `${entry.username}: ` : '';
   const text = entry?.text || '';
+  const user = entry?.username && !text.startsWith(`${entry.username}:`)
+    ? `${entry.username}: `
+    : '';
   return `[${date} ${time}] [${bot}] [${type}] ${user}${text}`;
 }
 
@@ -75,24 +111,14 @@ function appendTextLogEntry(entry) {
   } catch (err) {
     console.error('[LOGS] Plain-text log append failed:', err.message);
   }
-  // Также пишем в вечный полный лог
-  try {
-    fs.appendFileSync(FULL_LOG_PATH, `${formatTextLogEntry(entry)}\n`, 'utf8');
-  } catch (err) {
-    console.error('[LOGS] Full log append failed:', err.message);
-  }
 }
 
-function ensureTextArchive(logsArray) {
-  if (!Array.isArray(logsArray) || !logsArray.length) return;
-  const filePath = getLogFilePath(new Date(), '.txt');
+function appendJsonlLogEntry(entry) {
+  const filePath = getLogFilePath(new Date(entry.timestamp || Date.now()), '.jsonl');
   try {
-    const lines = logsArray.map(formatTextLogEntry);
-    if (!fs.existsSync(filePath) || fs.readFileSync(filePath, 'utf8').trim() !== lines.join('\n').trim()) {
-      fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
-    }
+    fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (err) {
-    console.error('[LOGS] Plain-text archive sync failed:', err.message);
+    console.error('[LOGS] JSONL log append failed:', err.message);
   }
 }
 
@@ -102,7 +128,7 @@ const DEFAULT_TG_TEMPLATE = '{emoji} Нарушение\n📅 Дата: {date}, 
 const defaultConfig = {
   host: 'eu.cheatmine.net',
   port: 25565,
-  password: 'Твой_ПЭССВАРД',
+  password: '',
   version: '1.12.2',
   panelPort: 4218,
   warpCommand: '',
@@ -141,16 +167,6 @@ const defaultConfig = {
       title: 'Разжигание розни',
       words: ['ниггер','нигга','хохол','фашист','нацист','расист','антисемит','черножопый','чурка','армянин','кацап','nigger','niga','нигер','white trash','угнетатель','расизм','нацизм']
     },
-    '2.10': {
-      title: 'Введение в заблуждение',
-      words: ['я админ','я создатель','я владелец','я хелпер','раздача','бесплатный донат','вас взломали','обновление','новая версия','скачать','это официальный сайт','админ разрешил','модер разрешил']
-    },
-    '2.13': {
-      title: 'Реклама',
-      words: [],
-      advertisingPattern: '\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b|(?:[a-zA-Z0-9-]+\\.)+(?:com|ru|net|org|me|gg|su|рф|online|site|xyz)\\b|www\\.|https?://',
-      scamExtra: '(?:бесплатн|free|scam|раздач|халява|click|перейди|забери)'
-    },
     '2.14': {
       title: 'Угрозы',
       words: ['убью','зарежу','приеду','найду','поколочу','изобью','тебе конец','ты покойник','тебе крышка','уничтожу','уничтожу тебя','kill you','убью тебя','задушу','сломаю','переломаю','сожгу','взорву','затоплю','тебе не жить','готовься','берегись']
@@ -160,33 +176,43 @@ const defaultConfig = {
 
 let config;
 
+function cloneDefaultConfig() {
+  return JSON.parse(JSON.stringify(defaultConfig));
+}
+
+function readConfigFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function writeConfigFile() {
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+}
+
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-      config = JSON.parse(raw);
-      if (config.rules && config.rules['2.13']) {
-        const rule = config.rules['2.13'];
-        if (typeof rule.advertisingPattern === 'string') {
-          rule.advertisingPattern = new RegExp(rule.advertisingPattern, 'i');
-        }
-        if (typeof rule.scamExtra === 'string') {
-          rule.scamExtra = new RegExp(rule.scamExtra, 'i');
-        }
-      }
+      config = readConfigFile(CONFIG_PATH);
     } else {
-      config = JSON.parse(JSON.stringify(defaultConfig));
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+      config = fs.existsSync(CONFIG_TEMPLATE_PATH)
+        ? readConfigFile(CONFIG_TEMPLATE_PATH)
+        : cloneDefaultConfig();
+      writeConfigFile();
     }
   } catch (err) {
     console.error('[CONFIG] Error loading config, using defaults:', err.message);
-    config = JSON.parse(JSON.stringify(defaultConfig));
+    config = cloneDefaultConfig();
   }
+
+  if (!config.rules || typeof config.rules !== 'object') config.rules = {};
+  delete config.rules['2.10'];
+  delete config.rules['2.13'];
 }
 loadConfig();
 
-// Переопределяем пароль из переменной окружения если задана
-if (process.env.MC_PASSWORD) config.password = process.env.MC_PASSWORD;
+function getMinecraftPassword() {
+  return process.env.MC_PASSWORD || config.password;
+}
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_CHAT_ID = -5346668750;
@@ -333,7 +359,7 @@ if (BOT_TOKEN) {
   tgBot = new TelegramBot(BOT_TOKEN, { polling: true });
 
   tgBot.onText(/\/start/, (msg) => {
-    tgBot.sendMessage(msg.chat.id, '⚡ *Модер-бот*\n\n/status — статус\n/players — игроки\n/chat _текст_ — чат\n/restart — перезапуск ботов\n/clear — очистить логи\n/logs — последние нарушения');
+    tgBot.sendMessage(msg.chat.id, '⚡ *Модер-бот*\n\n/status — статус\n/players — игроки\n/chat _текст_ — чат\n/restart — перезапуск ботов\n/logs — последние нарушения');
   });
 
   tgBot.onText(/\/status/, (msg) => {
@@ -359,7 +385,7 @@ if (BOT_TOKEN) {
     if (!isAdmin(msg)) return;
     const alive = activeBots.find(b => b?.player);
     if (!alive) return tgBot.sendMessage(msg.chat.id, 'Нет активных ботов.');
-    alive.chat(match[1]);
+    alive.sendLoggedChat?.(match[1]);
     tgBot.sendMessage(msg.chat.id, `✅ Отправлено: ${match[1]}`);
   });
 
@@ -367,14 +393,6 @@ if (BOT_TOKEN) {
     if (!isAdmin(msg)) return;
     startBots();
     tgBot.sendMessage(msg.chat.id, '🔄 Боты перезапущены.');
-  });
-
-  tgBot.onText(/\/clear/, (msg) => {
-    if (!isAdmin(msg)) return;
-    logs = [];
-    saveTodayLogs(logs);
-    if (io) io.emit('clearLogs');
-    tgBot.sendMessage(msg.chat.id, '🧹 Логи очищены.');
   });
 
   tgBot.onText(/\/logs/, (msg) => {
@@ -419,18 +437,28 @@ function getReconnectDelay() {
   return 5 * 60 * 1000;
 }
 
-//Переменные
-let logs = loadTodayLogs();
-let logsDirty = false;
+// Логи дописываются синхронно в JSONL и TXT, поэтому переживают рестарт процесса.
+let activeLogDay = getLogFileName();
+let logs = loadLogsForDay(activeLogDay);
 let io;
 
-// Сохраняем логи на диск не чаще раза в 3 секунды
-setInterval(() => {
-  if (logsDirty) {
-    logsDirty = false;
-    saveTodayLogs(logs);
+function rotateLogsIfNeeded(now = new Date()) {
+  const nextDay = getLogFileName(now);
+  if (nextDay === activeLogDay) return false;
+
+  activeLogDay = nextDay;
+  logs = loadLogsForDay(activeLogDay);
+  if (io) {
+    io.emit('logs_day_changed', {
+      date: activeLogDay,
+      logs: [...logs].slice(-400).reverse()
+    });
   }
-}, 3000);
+  console.log(`[LOGS] New day started: ${activeLogDay}`);
+  return true;
+}
+
+setInterval(() => rotateLogsIfNeeded(), 30 * 1000);
 
 const recentMessages = new Map();
 
@@ -456,6 +484,7 @@ function isDuplicate(username, message, botLabel, source) {
 
 function addPanelLog(type, text, botLabel, username) {
   const now = new Date();
+  rotateLogsIfNeeded(now);
   const entry = {
     timestamp: now.getTime(),
     date: fmtDate(now),
@@ -466,10 +495,10 @@ function addPanelLog(type, text, botLabel, username) {
   };
   if (username) entry.username = username;
   logs.push(entry);
+  appendJsonlLogEntry(entry);
   appendTextLogEntry(entry);
   if (io) io.emit('log', entry);
   console.log(`[${entry.bot}][${type.toUpperCase()}] ${text}`);
-  logsDirty = true;
 }
 
 // Дедупликация: одно сообщение может прийти и через 'chat', и через 'message'
@@ -491,35 +520,23 @@ function logChatMessage(botLabel, username, message) {
   addPanelLog('chat', `${username}: ${message}`, botLabel, username);
 }
 
-function scheduleMidnightReset() {
-  const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0);
-  const msUntilMidnight = midnight - now;
-  setTimeout(() => {
-    // Дописываем логи в файл истёкшего дня (имя считаем от "вчера")
-    const prev = new Date(Date.now() - 1000);
-    const y = prev.getFullYear();
-    const m = String(prev.getMonth() + 1).padStart(2, '0');
-    const d = String(prev.getDate()).padStart(2, '0');
-    const prevLogFile = path.join(LOGS_DIR, `${y}-${m}-${d}.json`);
-    const prevTextFile = path.join(LOGS_DIR, `${y}-${m}-${d}.txt`);
-    try {
-      fs.writeFileSync(prevLogFile, JSON.stringify(logs, null, 2), 'utf8');
-      if (logs.length) {
-        fs.writeFileSync(prevTextFile, `${logs.map(formatTextLogEntry).join('\n')}\n`, 'utf8');
-      }
-    } catch (err) {
-      console.error('[LOGS] Rotation save failed:', err.message);
+const rawMessageLogDedup = new Map();
+function logServerMessage(botLabel, message) {
+  const normalized = String(message || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return;
+  const key = `${botLabel}|${normalized}`;
+  const now = Date.now();
+  const last = rawMessageLogDedup.get(key) || 0;
+  if (now - last < 1200) return;
+  rawMessageLogDedup.set(key, now);
+  if (Math.random() < 0.05) {
+    const cutoff = now - 10000;
+    for (const [entryKey, timestamp] of rawMessageLogDedup) {
+      if (timestamp < cutoff) rawMessageLogDedup.delete(entryKey);
     }
-    logs = [];
-    logsDirty = false;
-    // Историю на клиентах не стираем — логи хранятся за всё время
-    console.log('[LOGS] New day started, logs rotated.');
-    scheduleMidnightReset();
-  }, msUntilMidnight);
+  }
+  addPanelLog('server', normalized, botLabel);
 }
-scheduleMidnightReset();
 
 //Обработка (функции)
 function cleanText(text) {
@@ -552,18 +569,6 @@ function countUpperCaseWords(text) {
     if (w.length > 1 && w === w.toUpperCase() && /[А-ЯЁA-Z]/.test(w)) c++;
   }
   return c;
-}
-
-function isAdvertising(text) {
-  const pattern = config.rules['2.13'].advertisingPattern;
-  if (!pattern) return false;
-  try { return pattern.test(text); } catch { return false; }
-}
-
-function isScamLink(text) {
-  const rule = config.rules['2.13'];
-  if (!rule.scamExtra) return isAdvertising(text);
-  try { return isAdvertising(text) && rule.scamExtra.test(text); } catch { return isAdvertising(text); }
 }
 
 const playerMessageHistory = new Map();
@@ -765,8 +770,6 @@ function getContextualCandidates(cleaned, rules) {
   }
   if (containsAny(cleaned, rules['2.4']?.words || [])) candidates.push('2.4');
   if (isBeggingCandidate(cleaned, rules['2.5']?.words || [])) candidates.push('2.5');
-  if (containsAny(cleaned, rules['2.10']?.words || [])) candidates.push('2.10');
-
   return candidates;
 }
 
@@ -784,7 +787,6 @@ function getFallbackViolation(cleaned, rules, candidateRules, knownParticipants)
   if (hasCandidate('2.5') && isBeggingRequest(cleaned, rules['2.5']?.words || [])) {
     return '2.5 (Попрошайничество) — мут 45м';
   }
-  if (hasCandidate('2.10')) return '2.10 (Введение в заблуждение) — мут 45м';
   return null;
 }
 
@@ -800,16 +802,6 @@ function checkViolations(username, message, botLabel, source) {
   const cleaned = cleanText(message);
   const rules = config.rules;
   const floodDetected = isFlood(username, message, botLabel);
-
-  if (isAdvertising(message)) {
-    reportViolation(
-      username,
-      message,
-      botLabel,
-      isScamLink(message) ? '2.13 (Скам-реклама) — пермаментный бан' : '2.13 (Реклама) — бан 3ч'
-    );
-    return;
-  }
 
   if (floodDetected) {
     reportViolation(username, message, botLabel, '2.7 (Флуд) — мут 20м');
@@ -848,6 +840,26 @@ function createBot(botInfo) {
   clearTimeout(rec.timer);
   rec.reconnecting = false;
 
+  function sendBotChat(text, { sensitive = false } = {}) {
+    const command = String(text || '').trim();
+    if (!command) return false;
+    const logText = sensitive ? '/l [hidden]' : command;
+    addPanelLog('outgoing', logText, botInfo.label, bot.username);
+    bot.chat(command);
+    return true;
+  }
+
+  function sendLogin() {
+    const password = getMinecraftPassword();
+    if (!password) {
+      addPanelLog('error', 'MC_PASSWORD не задан', botInfo.label);
+      return false;
+    }
+    return sendBotChat(`/l ${password}`, { sensitive: true });
+  }
+
+  bot.sendLoggedChat = sendBotChat;
+
   function scheduleReconnect(delay) {
     if (rec.reconnecting) return;
     rec.reconnecting = true;
@@ -866,13 +878,13 @@ function createBot(botInfo) {
   bot.on('login', () => {
     console.log(`[${botInfo.label}] Connected. Authorizing...`);
     onBotOnline();
-    bot.chat(`/l ${config.password}`);
+    sendLogin();
     setTimeout(() => {
-      bot.chat(botInfo.command);
+      sendBotChat(botInfo.command);
       console.log(`[${botInfo.label}] Sent ${botInfo.command}`);
       if (config.warpCommand?.trim()) {
         setTimeout(() => {
-          bot.chat(config.warpCommand.trim());
+          sendBotChat(config.warpCommand.trim());
           console.log(`[${botInfo.label}] Sent warp command: ${config.warpCommand.trim()}`);
         }, 2000);
       }
@@ -881,7 +893,7 @@ function createBot(botInfo) {
     clearInterval(ciInterval);
     ciInterval = setInterval(() => {
       const s = getBotState(botInfo.username);
-      if (bot?.player && s.ciEnabled) bot.chat('/ci');
+      if (bot?.player && s.ciEnabled) sendBotChat('/ci');
     }, 5 * 60 * 1000);
   });
 
@@ -930,7 +942,7 @@ function createBot(botInfo) {
     console.log(`[${botInfo.label}][SERVER] ${msgText}`);
 
     if (/регистрация|зарегистрируйтесь|войдите|введите пароль|\/login|\/register|авторизуйтесь/i.test(msgText)) {
-      bot.chat(`/l ${config.password}`);
+      sendLogin();
     }
 
     const warpCmd = config.warpCommand?.trim() || '/warp tribunal';
@@ -942,24 +954,26 @@ function createBot(botInfo) {
       /телепортировал вас|Телепортирование\.\.\.|Перемещение на/i.test(msgText)
     ) {
       teleportCooldown = now;
-      setTimeout(() => { bot.chat(warpCmd); }, 1500);
+      setTimeout(() => { sendBotChat(warpCmd); }, 1500);
       console.log(`[${botInfo.label}] Teleport detected, warping back: ${warpCmd}`);
     }
 
-    if (/^\[(?:Rcon|Server|Info|Admin|Mod|System)\]/i.test(msgText)) return;
-
     const arrowPos = msgText.indexOf('⇨');
-if (arrowPos === -1) return;
+    if (arrowPos === -1) {
+      logServerMessage(botInfo.label, msgText);
+      return;
+    }
 
-const afterArrow = msgText.substring(arrowPos + 1).trim();
+    const afterArrow = msgText.substring(arrowPos + 1).trim();
+    let username = findUsername(jsonMsg);
+    if (!username) username = extractUsername(msgText);
 
-let username = findUsername(jsonMsg);
-if (!username) username = extractUsername(msgText);
-
-if (username && username !== bot.username) {
-    logChatMessage(botInfo.label, username, afterArrow);
-    checkViolations(username, afterArrow, botInfo.label, 'message');
-}
+    if (username && username !== bot.username) {
+      logChatMessage(botInfo.label, username, afterArrow);
+      checkViolations(username, afterArrow, botInfo.label, 'message');
+    } else {
+      logServerMessage(botInfo.label, msgText);
+    }
   });
 
   bot.on('end', (reason) => {
@@ -1039,54 +1053,61 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api/logs', (req, res) => {
-  res.json(logs);
+  const day = typeof req.query.date === 'string' ? req.query.date : activeLogDay;
+  if (!isLogDay(day)) return res.status(400).json({ error: 'Некорректная дата' });
+  res.json({ date: day, logs: (day === activeLogDay ? logs : loadLogsForDay(day)).slice().reverse() });
 });
 
-// Скачать полный вечный лог
-app.get('/api/logs/full', (req, res) => {
-  if (!fs.existsSync(FULL_LOG_PATH)) return res.status(404).send('Лог пуст');
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="full_log.txt"');
-  fs.createReadStream(FULL_LOG_PATH).pipe(res);
-});
-
-// Вся история логов за все дни (кроме сегодняшнего — он приходит живым через сокет)
-app.get('/api/logs/history', (req, res) => {
-  const today = getLogFileName();
-  let files;
+function listLogDays() {
   try {
-    files = fs.readdirSync(LOGS_DIR)
-      .filter(f => f.endsWith('.json') && f !== `${today}.json`)
-      .sort()
-      .reverse(); // свежие даты первыми
-  } catch { return res.json([]); }
-
-  const all = [];
-  for (const file of files) {
-    try {
-      const data = JSON.parse(fs.readFileSync(path.join(LOGS_DIR, file), 'utf8'));
-      if (!Array.isArray(data)) continue;
-      const dateShort = `${file.slice(8, 10)}.${file.slice(5, 7)}`; // DD.MM из YYYY-MM-DD.json
-      for (let i = data.length - 1; i >= 0; i--) {
-        const e = data[i];
-        if (e && typeof e === 'object') {
-          e.date = e.date || dateShort;
-          all.push(e);
-        }
-      }
-    } catch { /* пропускаем повреждённый файл */ }
+    const days = new Set();
+    for (const file of fs.readdirSync(LOGS_DIR)) {
+      const match = file.match(/^(\d{4}-\d{2}-\d{2})\.(?:json|jsonl|txt)$/);
+      if (match) days.add(match[1]);
+    }
+    days.add(activeLogDay);
+    return [...days].sort().reverse();
+  } catch {
+    return [activeLogDay];
   }
-  res.json(all);
+}
+
+app.get('/api/logs/days', (req, res) => {
+  res.json({ currentDate: activeLogDay, days: listLogDays() });
 });
 
-app.get('/api/config', (req, res) => res.json(config));
-
-app.post('/api/clear', (req, res) => {
-  logs = [];
-  saveTodayLogs(logs);
-  if (io) io.emit('clearLogs');
-  res.json({ success: true });
+app.get('/api/logs/day/:date', (req, res) => {
+  const { date } = req.params;
+  if (!isLogDay(date)) return res.status(400).json({ error: 'Некорректная дата' });
+  const dayLogs = date === activeLogDay ? logs : loadLogsForDay(date);
+  res.json({ date, logs: dayLogs.slice().reverse() });
 });
+
+app.get('/api/logs/download/:date', (req, res) => {
+  const { date } = req.params;
+  if (!isLogDay(date)) return res.status(400).send('Некорректная дата');
+
+  const textPath = getLogFilePath(date, '.txt');
+  if (fs.existsSync(textPath)) {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="moderbot-${date}.txt"`);
+    return fs.createReadStream(textPath).pipe(res);
+  }
+
+  const dayLogs = date === activeLogDay ? logs : loadLogsForDay(date);
+  if (!dayLogs.length) return res.status(404).send('За этот день логов нет');
+  const body = `${dayLogs.map(formatTextLogEntry).join('\n')}\n`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="moderbot-${date}.txt"`);
+  res.send(body);
+});
+
+function getPublicConfig() {
+  const { password, rules, ...publicConfig } = config;
+  return publicConfig;
+}
+
+app.get('/api/config', (req, res) => res.json(getPublicConfig()));
 
 app.post('/api/config', (req, res) => {
   const newConfig = req.body;
@@ -1097,34 +1118,9 @@ app.post('/api/config', (req, res) => {
     if (newConfig.version) config.version = newConfig.version;
     if (newConfig.warpCommand !== undefined) config.warpCommand = newConfig.warpCommand;
     if (newConfig.bots) config.bots = newConfig.bots;
-    if (newConfig.rules) {
-      for (const [ruleId, rule] of Object.entries(newConfig.rules)) {
-        if (config.rules[ruleId]) {
-          if (rule.words) config.rules[ruleId].words = rule.words;
-          if (ruleId === '2.7') {
-            if (rule.capsThreshold !== undefined) config.rules['2.7'].capsThreshold = rule.capsThreshold;
-            if (rule.spamThreshold !== undefined) config.rules['2.7'].spamThreshold = rule.spamThreshold;
-            if (rule.spamWindowMs !== undefined) config.rules['2.7'].spamWindowMs = rule.spamWindowMs;
-            if (rule.minMessageLength !== undefined) config.rules['2.7'].minMessageLength = rule.minMessageLength;
-            if (rule.floodThreshold !== undefined) config.rules['2.7'].floodThreshold = rule.floodThreshold;
-          }
-          if (ruleId === '2.13') {
-            if (typeof rule.advertisingPattern === 'string') {
-              config.rules['2.13'].advertisingPattern = new RegExp(rule.advertisingPattern, 'i');
-            }
-            if (typeof rule.scamExtra === 'string') {
-              config.rules['2.13'].scamExtra = new RegExp(rule.scamExtra, 'i');
-            }
-          }
-        }
-      }
-    }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, (key, value) => {
-      if (value instanceof RegExp) return value.source;
-      return value;
-    }, 2), 'utf8');
+    writeConfigFile();
     startBots();
-    io.emit('configUpdated', config);
+    io.emit('configUpdated', getPublicConfig());
     res.json({ success: true });
   } else {
     res.status(400).json({ success: false, error: 'Invalid config' });
@@ -1168,6 +1164,7 @@ function emitStatus() {
 function buildInitPayload() {
   return {
     bots: getBotsStatus(),
+    logDate: activeLogDay,
     logs: [...logs].slice(-400).reverse(),
     config: {
       host: config.host,
@@ -1176,8 +1173,7 @@ function buildInitPayload() {
       warpCommand: config.warpCommand || '',
       panelPort: config.panelPort,
       tgTemplate: (typeof config.tgTemplate === 'string' && config.tgTemplate.trim()) ? config.tgTemplate : DEFAULT_TG_TEMPLATE
-    },
-    rules: config.rules || {}
+    }
   };
 }
 
@@ -1186,7 +1182,6 @@ io.on('connection', (socket) => {
 
   socket.on('command', (cmd) => {
     if (cmd === 'restart') startBots();
-    else if (cmd === 'clear') { logs = []; saveTodayLogs(logs); io.emit('clearLogs'); }
   });
 
   socket.on('send_command', (payload) => {
@@ -1194,7 +1189,7 @@ io.on('connection', (socket) => {
     if (!text) return;
     const bot = activeBots.find(b => b.username === username);
     if (bot?.player) {
-      bot.chat(text);
+      bot.sendLoggedChat?.(text);
       socket.emit('send_command_result', { success: true, username, text });
     } else {
       socket.emit('send_command_result', { success: false, reason: 'Бот оффлайн' });
@@ -1246,10 +1241,6 @@ io.on('connection', (socket) => {
     onBotOffline();
     emitStatus();
   });
-
-  function saveConfigFile() {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, (key, value) => value instanceof RegExp ? value.source : value, 2), 'utf8');
-  }
 
   function botUsesGlobal(cfg, key) {
     return !cfg[key] || cfg[key] === 0;
@@ -1338,16 +1329,6 @@ io.on('connection', (socket) => {
     io.emit('init', buildInitPayload());
   });
 
-  socket.on('update_rules', (rules) => {
-    if (!rules || typeof rules !== 'object') return;
-    for (const [id, rule] of Object.entries(rules)) {
-      if (config.rules[id] && Array.isArray(rule.words)) {
-        config.rules[id].words = rule.words.filter(w => String(w).trim());
-      }
-    }
-    saveConfigFile();
-    io.emit('init', buildInitPayload());
-  });
 });
 
 app.get('/health', (req, res) => res.send('OK'));

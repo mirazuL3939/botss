@@ -17,6 +17,8 @@ const els = {
   addPlayerFilter: $('addPlayerFilter'),
   clearPlayerFilters: $('clearPlayerFilters'),
   logSearch: $('logSearch'),
+  logDate: $('logDate'),
+  downloadDayLog: $('downloadDayLog'),
   logCount: $('logCount'),
   logs: $('logs'),
   chatBotSelect: $('chatBotSelect'),
@@ -24,20 +26,17 @@ const els = {
   chatSendBtn: $('chatSendBtn'),
   botToggleBtn: $('botToggleBtn'),
   botRestartBtn: $('botRestartBtn'),
-  openLinksPanel: $('openLinksPanel'),
-  linksModal: $('linksModal'),
-  linksList: $('linksList'),
-  copyAllLinks: $('copyAllLinks'),
-  closeLinksModal: $('closeLinksModal'),
   toast: $('toast')
 };
 
 const state = {
   bots: [],
-  logs: [],      // сегодняшние (живые)
-  history: [],   // все прошлые дни
+  logs: [],
+  selectedDayLogs: [],
+  currentLogDate: '',
+  selectedLogDate: '',
+  logDays: [],
   inited: false,
-  historyLoaded: false,
   config: {},
   logFilters: new Set(),
   playerFilters: new Set(),
@@ -213,153 +212,68 @@ function bindPlayerFilterControls() {
   });
 }
 
-function extractLinksFromText(text) {
-  if (!text) return [];
+function getDisplayedLogs() {
+  return state.selectedLogDate === state.currentLogDate ? state.logs : state.selectedDayLogs;
+}
 
-  const patterns = [
-    /(?:https?:\/\/|[A-Za-z0-9-]+:\/\/)[^\s<>'")]+/gi,
-    /(?:https?:\/\/|[A-Za-z0-9-]+:\/\/)[A-Za-z0-9.-]+\.[A-Za-zА-Яа-я]{2,}[^\s<>'")]*/gi,
-    /(?:www\.)[A-Za-z0-9.-]+\.[A-Za-zА-Яа-я]{2,}[^\s<>'")]*/gi
-  ];
+async function refreshLogDays() {
+  try {
+    const response = await fetch('/api/logs/days');
+    if (!response.ok) return;
+    const payload = await response.json();
+    state.logDays = Array.isArray(payload.days) ? payload.days : [];
+    if (!state.currentLogDate && payload.currentDate) state.currentLogDate = payload.currentDate;
+    if (!state.selectedLogDate && state.currentLogDate) {
+      state.selectedLogDate = state.currentLogDate;
+      els.logDate.value = state.currentLogDate;
+    }
+  } catch {
+    // Дневной список обновится при следующем подключении сокета.
+  }
+}
 
-  const unique = [];
-  const seen = new Set();
+async function selectLogDate(day) {
+  if (!day) return;
+  state.selectedLogDate = day;
+  els.logDate.value = day;
 
-  for (const pattern of patterns) {
-    const matches = text.match(pattern) || [];
-    for (const rawLink of matches) {
-      const clean = rawLink
-        .replace(/[),.;]+$/, '')
-        .replace(/[\u2018\u2019\u201C\u201D]+$/g, '')
-        .trim();
+  if (day === state.currentLogDate) {
+    state.selectedDayLogs = [];
+    renderPlayerTabs();
+    renderLogs();
+    return;
+  }
 
-      if (!clean || seen.has(clean.toLowerCase())) continue;
-      seen.add(clean.toLowerCase());
-      unique.push(clean);
+  state.selectedDayLogs = [];
+  renderPlayerTabs();
+  renderLogs();
+  try {
+    const response = await fetch(`/api/logs/day/${encodeURIComponent(day)}`);
+    if (!response.ok) throw new Error('Log day is unavailable');
+    const payload = await response.json();
+    if (state.selectedLogDate !== day) return;
+    state.selectedDayLogs = Array.isArray(payload.logs) ? payload.logs : [];
+  } catch {
+    if (state.selectedLogDate === day) {
+      state.selectedDayLogs = [];
+      showToast('Не удалось загрузить логи за выбранный день');
     }
   }
-
-  if (unique.length) return unique;
-
-  const fallback = text.match(/[A-Za-z0-9.-]+\.[A-Za-zА-Яа-я]{2,}(?:\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?/gi) || [];
-  for (const rawLink of fallback) {
-    const clean = rawLink.replace(/[),.;]+$/, '').trim();
-    if (!clean || seen.has(clean.toLowerCase())) continue;
-    seen.add(clean.toLowerCase());
-    unique.push(clean);
-  }
-
-  return unique;
+  renderPlayerTabs();
+  renderLogs();
 }
 
-function getVisibleLinkItems() {
-  const q = state.logSearch.trim().toLowerCase();
-  const all = state.logs.concat(state.history);
-  const filtered = all.filter(entry => {
-    if (state.logFilters.size && !state.logFilters.has(entry.bot)) return false;
-    if (!playerMatchesFilter(entry.username)) return false;
-    if (!q) return true;
-    const searchText = [
-      entry.text || '',
-      entry.username || '',
-      entry.bot || '',
-      entry.type || '',
-      entry.date || '',
-      entry.time || '',
-      entry.date && entry.time ? `${entry.date} ${entry.time}` : ''
-    ].join(' ').toLowerCase();
-    return searchText.includes(q);
-  });
-
-  const items = [];
-  filtered.forEach(entry => {
-    const urls = extractLinksFromText(entry.text || '');
-    urls.forEach(url => {
-      items.push({
-        url,
-        bot: entry.bot || 'system',
-        username: entry.username || '',
-        source: entry.text || ''
-      });
-    });
-  });
-  return items;
-}
-
-function renderLinkPanel() {
-  const items = getVisibleLinkItems();
-  els.linksList.innerHTML = '';
-
-  if (!items.length) {
-    const empty = el('div', 'link-empty', 'Ссылок в текущем фильтре не найдено.');
-    els.linksList.appendChild(empty);
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  items.forEach(({ url, bot, username }, index) => {
-    const item = el('div', 'link-item');
-    const meta = el('div', 'link-meta');
-    meta.textContent = `${bot}${username ? ` · ${username}` : ''}`;
-
-    const urlEl = el('a', 'link-value', url);
-    urlEl.href = url;
-    urlEl.target = '_blank';
-    urlEl.rel = 'noopener noreferrer';
-
-    const actions = el('div', 'link-actions');
-    const copyBtn = el('button', 'link-copy', 'Копировать');
-    copyBtn.type = 'button';
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(url);
-        showToast(`Ссылка скопирована (${index + 1}/${items.length})`);
-      } catch {
-        showToast('Не удалось скопировать ссылку');
-      }
-    });
-
-    actions.appendChild(copyBtn);
-    item.append(meta, urlEl, actions);
-    fragment.appendChild(item);
-  });
-
-  els.linksList.appendChild(fragment);
-}
-
-function openLinksPanel() {
-  renderLinkPanel();
-  els.linksModal.hidden = false;
-}
-
-function closeLinksPanel() {
-  els.linksModal.hidden = true;
-}
-
-els.openLinksPanel.addEventListener('click', openLinksPanel);
-els.closeLinksModal.addEventListener('click', closeLinksPanel);
-els.linksModal.addEventListener('click', (event) => {
-  if (event.target === els.linksModal) closeLinksPanel();
-});
-els.copyAllLinks.addEventListener('click', async () => {
-  const items = getVisibleLinkItems();
-  if (!items.length) {
-    showToast('Ссылок нет');
-    return;
-  }
-  const text = [...new Set(items.map(item => item.url))].join('\n');
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast(`Скопировано ${new Set(items.map(item => item.url)).size} ссылок`);
-  } catch {
-    showToast('Не удалось скопировать все ссылки');
-  }
+els.logDate.addEventListener('change', () => selectLogDate(els.logDate.value));
+els.downloadDayLog.addEventListener('click', () => {
+  const day = state.selectedLogDate || state.currentLogDate;
+  if (!day) return;
+  window.location.assign(`/api/logs/download/${encodeURIComponent(day)}`);
 });
 
 function renderLogs() {
   els.logs.innerHTML = '';
   const q = state.logSearch.trim().toLowerCase();
-  const all = state.logs.concat(state.history);
+  const all = getDisplayedLogs();
   const filtered = all.filter(entry => {
     if (state.logFilters.size && !state.logFilters.has(entry.bot)) return false;
     if (!playerMatchesFilter(entry.username)) return false;
@@ -387,10 +301,14 @@ function renderLogs() {
   filtered.slice(0, 300).forEach(entry => {
     const line = el('div', 'log-line ' + (entry.type || ''));
     const timeLabel = entry.date ? `[${entry.date} ${entry.time}] ` : `[${entry.time}] `;
+    const text = entry.text || '';
+    const message = entry.username && !text.startsWith(`${entry.username}:`)
+      ? `${entry.username}: ${text}`
+      : text;
     line.append(
       el('span', 'log-time', timeLabel),
       el('span', 'log-bot', `${entry.bot} `),
-      document.createTextNode(entry.text || '')
+      document.createTextNode(message)
     );
     frag.appendChild(line);
   });
@@ -477,20 +395,14 @@ const btnViewGames = $('btnViewGames');
 
 function switchView(name) {
   const games = name === 'games';
-  const rules = name === 'rules';
-  viewMain.hidden = games || rules;
+  viewMain.hidden = games;
   viewGames.hidden = !games;
-  const viewRulesEl = $('viewRules');
-  if (viewRulesEl) viewRulesEl.hidden = !rules;
-  btnViewMain.classList.toggle('active', !games && !rules);
+  btnViewMain.classList.toggle('active', !games);
   btnViewGames.classList.toggle('active', games);
-  const btnRules = $('btnViewRules');
-  if (btnRules) btnRules.classList.toggle('active', rules);
   if (window.MiniGames) {
     if (games) MiniGames.show();
     else MiniGames.hide();
   }
-  if (rules) renderRules();
 }
 
 btnViewMain.addEventListener('click', () => switchView('main'));
@@ -511,36 +423,30 @@ socket.on('disconnect', () => {
 
 socket.on('init', (payload) => {
   state.bots = payload.bots || [];
+  const previousCurrentDate = state.currentLogDate;
+  state.currentLogDate = payload.logDate || state.currentLogDate;
+  state.logs = payload.logs || [];
   if (!state.inited) {
     state.inited = true;
-    state.logs = payload.logs || [];
+    state.selectedLogDate = state.currentLogDate;
+  } else if (state.selectedLogDate === previousCurrentDate && state.currentLogDate !== previousCurrentDate) {
+    state.selectedLogDate = state.currentLogDate;
+    state.selectedDayLogs = [];
+  }
+  if (state.currentLogDate) {
+    els.logDate.max = state.currentLogDate;
+    els.logDate.value = state.selectedLogDate || state.currentLogDate;
   }
   state.config = payload.config || {};
-  state.config.rules = payload.rules || {};
   setInputVal(els.hostInput, state.config.host || '');
   setInputVal(els.tgTemplate, state.config.tgTemplate || '');
   els.serverLine.textContent = `${state.config.host || '—'}:${state.config.port || '—'} · ${state.config.version || '—'}`;
 
-  // История за все дни грузится один раз при открытии страницы
-  if (!state.historyLoaded) {
-    state.historyLoaded = true;
-    fetch('/api/logs/history')
-      .then(r => r.json())
-      .then(h => {
-        if (Array.isArray(h)) {
-          state.history = h;
-          renderPlayerTabs();
-          renderLogs();
-        }
-      })
-      .catch(() => {});
-  }
-
+  void refreshLogDays();
   renderLogTabs();
   renderPlayerTabs();
   renderLogs();
   renderChatBotSelect();
-  if (typeof updateQuickAddExisting === 'function') updateQuickAddExisting();
 });
 
 socket.on('status', (data) => {
@@ -551,13 +457,23 @@ socket.on('status', (data) => {
 
 socket.on('log', (entry) => {
   state.logs.unshift(entry);
-  if (state.logs.length > 5000) state.logs.pop(); // полные данные дня всё равно в файле
-  renderPlayerTabs();
-  renderLogs();
+  if (state.logs.length > 5000) state.logs.pop();
+  if (state.selectedLogDate === state.currentLogDate) {
+    renderPlayerTabs();
+    renderLogs();
+  }
 });
 
-socket.on('clearLogs', () => {
-  state.logs = []; // чистим только сегодняшние, история прошлых дней остаётся
+socket.on('logs_day_changed', (payload) => {
+  const wasCurrentDaySelected = state.selectedLogDate === state.currentLogDate;
+  state.currentLogDate = payload.date || state.currentLogDate;
+  state.logs = payload.logs || [];
+  els.logDate.max = state.currentLogDate;
+  if (wasCurrentDaySelected || !state.selectedLogDate) {
+    state.selectedLogDate = state.currentLogDate;
+    els.logDate.value = state.currentLogDate;
+  }
+  void refreshLogDays();
   renderPlayerTabs();
   renderLogs();
 });
@@ -566,135 +482,3 @@ socket.on('send_command_result', (data) => {
   if (data.success) showToast(`✅ Отправлено (${data.username}): ${data.text}`);
   else showToast(`❌ Не отправлено: ${data.reason || 'бот оффлайн'}`);
 });
-
-/* ── Триггеры ────────────────────────────── */
-
-const RULE_LABELS = {
-  '2.1': 'Оскорбления',
-  '2.3': 'Личная жизнь',
-  '2.4': 'Провокации',
-  '2.5': 'Попрошайничество',
-  '2.9': 'Разжигание розни',
-  '2.10': 'Введение в заблуждение',
-  '2.13': 'Реклама',
-  '2.14': 'Угрозы'
-};
-
-function renderRules() {
-  const container = $('rulesContainer');
-  if (!container) return;
-  const rules = state.config.rules || {};
-  container.innerHTML = '';
-
-  Object.entries(RULE_LABELS).forEach(([id, label]) => {
-    const rule = rules[id];
-    if (!rule || !Array.isArray(rule.words)) return;
-
-    const card = document.createElement('div');
-    card.className = 'card rule-card';
-
-    const head = document.createElement('div');
-    head.className = 'card-head';
-    head.innerHTML = `<h2>${id} — ${label}</h2><span class="badge rule-badge-${id}">saved</span>`;
-    card.appendChild(head);
-
-    const textarea = document.createElement('textarea');
-    textarea.className = 'rule-textarea';
-    textarea.rows = 4;
-    textarea.spellcheck = false;
-    textarea.value = rule.words.join(', ');
-    textarea.placeholder = 'слово1, слово2, ...';
-
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = `${rule.words.length} слов · через запятую`;
-
-    const badge = head.querySelector(`.rule-badge-${id}`);
-    badge.textContent = 'saved ✓';
-    badge.classList.add('ok');
-
-    const save = debounce(() => {
-      const words = textarea.value
-        .split(',')
-        .map(w => w.trim().toLowerCase())
-        .filter(Boolean);
-      socket.emit('update_rules', { [id]: { words } });
-      // Обновляем локальный стейт сразу
-      if (state.config.rules && state.config.rules[id]) {
-        state.config.rules[id].words = words;
-      }
-      hint.textContent = `${words.length} слов · через запятую`;
-      badge.textContent = 'saved ✓';
-      badge.classList.add('ok');
-      showToast(`✅ Правило ${id} обновлено`);
-    }, 800);
-
-    textarea.addEventListener('input', () => {
-      badge.textContent = 'editing…';
-      badge.classList.remove('ok');
-      save();
-    });
-
-    card.appendChild(textarea);
-    card.appendChild(hint);
-    container.appendChild(card);
-  });
-}
-
-/* ── Вкладка Триггеры ────────────────────── */
-const btnViewRules = $('btnViewRules');
-if (btnViewRules) btnViewRules.addEventListener('click', () => switchView('rules'));
-
-const newTriggerWord = $('newTriggerWord');
-const newTriggerRuleSelect = $('newTriggerRuleSelect');
-const addTriggerBtn = $('addTriggerBtn');
-const quickAddExisting = $('quickAddExisting');
-
-function updateQuickAddExisting() {
-  if (!quickAddExisting || !newTriggerRuleSelect) return;
-  const ruleId = newTriggerRuleSelect.value;
-  const rules = state.config.rules || {};
-  if (rules[ruleId] && rules[ruleId].words && rules[ruleId].words.length > 0) {
-    quickAddExisting.textContent = 'Уже есть: ' + rules[ruleId].words.join(', ');
-  } else {
-    quickAddExisting.textContent = 'Пока нет слов в этом правиле';
-  }
-}
-
-if (newTriggerRuleSelect) {
-  Object.entries(RULE_LABELS).forEach(([id, label]) => {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = `${id} — ${label}`;
-    newTriggerRuleSelect.appendChild(opt);
-  });
-  newTriggerRuleSelect.addEventListener('change', updateQuickAddExisting);
-}
-
-if (addTriggerBtn) {
-  addTriggerBtn.addEventListener('click', () => {
-    const word = newTriggerWord.value.trim().toLowerCase();
-    const ruleId = newTriggerRuleSelect.value;
-    if (!word || !ruleId) return;
-
-    const rules = state.config.rules || {};
-    if (!rules[ruleId]) return;
-    
-    if (rules[ruleId].words.includes(word)) {
-      showToast('Слово уже есть в этом правиле!');
-      return;
-    }
-
-    rules[ruleId].words.push(word);
-    socket.emit('update_rules', { [ruleId]: { words: rules[ruleId].words } });
-    
-    newTriggerWord.value = '';
-    showToast(`✅ Слово добавлено в правило ${ruleId}`);
-    renderRules(); // перерисовываем карточки
-    updateQuickAddExisting(); // обновляем текст подсказки
-  });
-  
-  newTriggerWord.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addTriggerBtn.click();
-  });
-}
