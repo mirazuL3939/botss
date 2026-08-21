@@ -1,4 +1,5 @@
 // bot.js
+require('dotenv').config();
 const { TelegramBot } = require('node-telegram-bot-api');
 const mineflayer = require('mineflayer');
 const express = require('express');
