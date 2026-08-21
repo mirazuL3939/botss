@@ -822,13 +822,13 @@ function checkViolations(username, message, botLabel, source) {
 //Боты настройка ебаная кароче создание там хуяние
 function createBot(botInfo) {
   const bot = mineflayer.createBot({
-    host: botInfo.host || config.host,
-    port: botInfo.port || config.port,
-    username: botInfo.username,
-    version: botInfo.version || config.version,
-    auth: 'offline',
-    keepAliveTimeout: 60000,
-    checkTimeoutInterval: 60000,
+   host: botInfo.host || config.host,
+   port: botInfo.port || config.port,
+   username: botInfo.username,
+   version: botInfo.version || config.version,
+   auth: 'offline',
+   keepAliveTimeout: 120000,
+   checkTimeoutInterval: 30000,
   });
 
   bot._host = botInfo.host || config.host;
@@ -855,7 +855,7 @@ function createBot(botInfo) {
     if (!password) {
       addPanelLog('error', 'MC_PASSWORD не задан', botInfo.label);
       return false;
-    }
+    }     
     return sendBotChat(`/l ${password}`, { sensitive: true });
   }
 
@@ -1014,33 +1014,58 @@ function createBot(botInfo) {
 
   bot.on('end', (reason) => {
     clearInterval(ciInterval);
-    // Бота убрали из activeBots (stop/restart/remove/save) — не переподключаем
-    if (!activeBots.includes(bot)) return;
+
+    console.log('');
+    console.log(`[${botInfo.label}] ❌ CONNECTION CLOSED`);
+    console.log(`[${botInfo.label}] Reason: ${reason || 'unknown'}`);
+
+    // Если бот был удалён из activeBots намеренно
+    // (например, restart/stop/save) — обратно не подключаем.
+    if (!activeBots.includes(bot)) {
+        console.log(
+            `[${botInfo.label}] Reconnect skipped: bot is not active`
+        );
+        return;
+    }
+
     onBotOffline();
-    addPanelLog('error', `Disconnected: ${reason}`, botInfo.label);
 
-    const isConnectionRefused = /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|connect/i.test(reason);
-    const isKicked = /kick|бан|ban/i.test(reason);
+    addPanelLog(
+        'error',
+        `Disconnected: ${reason || 'unknown'}`,
+        botInfo.label
+    );
 
-    if (isConnectionRefused && !isKicked) {
-      maintenanceFailures++;
-      quickReconnect = false;
-    }
+    // Любое обычное отключение → реконнект через 10 секунд.
+    const delay = 10000;
 
-    const delay = isKicked ? 10000 : getReconnectDelay();
-    console.log(`[${botInfo.label}] Reconnecting in ${delay / 1000}s... (failures: ${maintenanceFailures})`);
+    console.log(
+        `[${botInfo.label}] 🔄 Reconnecting in ${delay / 1000}s...`
+    );
+
     scheduleReconnect(delay);
-  });
+});
 
-  bot.on('error', (err) => {
+
+bot.on('error', (err) => {
     if (!activeBots.includes(bot)) return;
-    addPanelLog('error', err.message, botInfo.label);
-    if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH/i.test(err.message)) {
-      maintenanceFailures++;
-      quickReconnect = false;
-      scheduleReconnect(getReconnectDelay());
-    }
-  });
+
+    const errorText = err?.message || String(err);
+
+    console.error(
+        `[${botInfo.label}] ⚠️ CONNECTION ERROR: ${errorText}`
+    );
+
+    addPanelLog(
+        'error',
+        `Connection error: ${errorText}`,
+        botInfo.label
+    );
+
+    // Здесь специально НЕ вызываем scheduleReconnect().
+    // Mineflayer после ошибки должен завершить соединение,
+    // после чего сработает "end", который выполнит reconnect.
+});
 
   return bot;
 }
