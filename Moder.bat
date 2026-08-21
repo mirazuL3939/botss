@@ -1,5 +1,11 @@
 @echo off
 cd /d "%~dp0"
-set BOT_TOKEN=8910254450:AAHJ_SeK79xFK_x6JgraUTwHYyb8otlgE3s
+if not exist .env (
+    echo Creating .env from example...
+    copy .env.example .env
+    echo Please edit .env with your tokens and restart.
+    pause
+    exit /b
+)
 node bot.js
 pause

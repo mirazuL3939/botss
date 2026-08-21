@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: moderbot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node bot.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: TZ
+        value: Europe/Moscow
+      - key: DATA_DIR
+        value: /opt/render/project/data
+      - key: CONFIG_PATH
+        value: /opt/render/project/data/config.json
+      - key: LOGS_DIR
+        value: /opt/render/project/data/logs
+      - key: BOT_TOKEN
+        sync: false
+      - key: MC_PASSWORD
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+    disk:
+      name: moderbot-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1

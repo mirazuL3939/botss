@@ -130,7 +130,7 @@ const defaultConfig = {
   port: 25565,
   password: '',
   version: '1.12.2',
-  panelPort: 4218,
+  panelPort: 10000,
   warpCommand: '',
   tgTemplate: DEFAULT_TG_TEMPLATE,
   bots: [
@@ -1331,15 +1331,44 @@ io.on('connection', (socket) => {
 
 });
 
-app.get('/health', (req, res) => res.send('OK'));
+app.get('/health', (req, res) => {
+  const botsOnline = activeBots.filter(b => b?.player).length;
+  res.json({ 
+    status: 'OK', 
+    bots: { online: botsOnline, total: activeBots.length },
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+function gracefulShutdown(signal) {
+  console.log(`[SYSTEM] Received ${signal}, shutting down gracefully...`);
+  
+  for (const bot of activeBots) {
+    try { bot.quit(); } catch (e) {}
+  }
+  
+  server.close(() => {
+    console.log('[WEB] HTTP server closed');
+    process.exit(0);
+  });
+  
+  setTimeout(() => {
+    console.error('[SYSTEM] Force exit after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[WEB] Порт ${process.env.PORT || config.panelPort || 4218} занят.`);
+    console.error(`[WEB] Порт ${process.env.PORT || config.panelPort || 10000} занят.`);
   }
 });
-server.listen(process.env.PORT || config.panelPort || 4218, '0.0.0.0', () => {
-  console.log(`[WEB] Panel ready on port ${process.env.PORT || config.panelPort || 4218}`);
+server.listen(process.env.PORT || config.panelPort || 10000, '0.0.0.0', () => {
+  console.log(`[WEB] Panel ready on port ${process.env.PORT || config.panelPort || 10000}`);
 });
 
 startBots();

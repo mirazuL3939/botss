@@ -1,23 +1,23 @@
 {
+  "name": "moderbot",
+  "version": "1.0.0",
+  "description": "Minecraft moderation bot with web panel",
+  "main": "bot.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node bot.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "express": "^5.2.1",
     "mineflayer": "^4.37.1",
     "node-telegram-bot-api": "^1.1.2",
     "socket.io": "^4.8.3"
   },
-  "name": "qwfooqwfk",
-  "version": "1.0.0",
-  "description": "",
-  "main": "bot.js",
-  "scripts": {
-    "start": "node bot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "keywords": [],
+  "keywords": ["minecraft", "moderation", "bot"],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "license": "ISC"
 }

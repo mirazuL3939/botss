@@ -1,28 +1,20 @@
 {
   "host": "eu.cheatmine.net",
   "port": 25565,
-  "password": "2913329133",
+  "password": "",
   "version": "1.12.2",
-  "panelPort": 4218,
+  "panelPort": 10000,
   "warpCommand": "",
   "bots": [
     {
       "username": "tribunal",
       "command": "/s1",
-      "label": "S1",
-      "password": "",
-      "version": "1.12.2",
-      "host": "eu.cheatmine.net",
-      "port": 25565
+      "label": "S1"
     },
     {
       "username": "lanubirt",
       "command": "/s2",
-      "label": "S2",
-      "password": "",
-      "version": "1.12.2",
-      "host": "eu.cheatmine.net",
-      "port": 25565
+      "label": "S2"
     }
   ],
   "rules": {
@@ -239,12 +231,6 @@
         "нацизм"
       ]
     },
-    "2.13": {
-      "title": "Реклама",
-      "words": [],
-      "advertisingPattern": "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b|(?:[a-zA-Z0-9-]+\\.)+(?:com|ru|net|org|me|gg|su|рф|online|site|xyz)\\b|www\\.|https?:\\/\\/",
-      "scamExtra": "(?:бесплатн|free|scam|раздач|халява|click|перейди|забери)"
-    },
     "2.14": {
       "title": "Угрозы",
       "words": [
@@ -273,5 +259,5 @@
       ]
     }
   },
-  "tgTemplate": "{emoji} Нарушение\n📅 Дата: {date}, {time}\n🎮 Режим: {mode}\n👤 Игрок: {player}\n⚖️ Предположительное нарушение: {rule}\n💬 Сообщение: {message}"
+  "tgTemplate": "{emoji} Нарушение\n📅 Дата: {date}, {time}\n🎮 Режим: {mode}\n👤 Игрок: {player}\n⚖️ Правило: {rule}\n📋 Описание: {desc}\n💬 Сообщение: {message}\n🚨 Наказание: {punishment}"
 }
