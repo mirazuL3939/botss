@@ -898,6 +898,41 @@ function createBot(botInfo) {
     }, 5 * 60 * 1000);
   });
 
+  let lastPos = null;
+  let positionCheckInterval = null;
+
+  bot.on('spawn', () => {
+    if (bot.entity?.position) {
+      lastPos = { x: bot.entity.position.x, y: bot.entity.position.y, z: bot.entity.position.z };
+      console.log(`[${botInfo.label}] Initial position saved: ${lastPos.x.toFixed(1)}, ${lastPos.y.toFixed(1)}, ${lastPos.z.toFixed(1)}`);
+    }
+
+    positionCheckInterval = setInterval(() => {
+      if (!bot.entity?.position || !lastPos) return;
+      const s = getBotState(botInfo.username);
+      if (!s.antiteleportEnabled) return;
+
+      const pos = bot.entity.position;
+      const dx = Math.abs(pos.x - lastPos.x);
+      const dy = Math.abs(pos.y - lastPos.y);
+      const dz = Math.abs(pos.z - lastPos.z);
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (dist > 10) {
+        console.log(`[${botInfo.label}] Teleport detected! Distance: ${dist.toFixed(1)} blocks. Warping back...`);
+        lastPos = { x: pos.x, y: pos.y, z: pos.z };
+        const warpCmd = config.warpCommand?.trim() || '/warp tribunal';
+        setTimeout(() => { sendBotChat(warpCmd); }, 500);
+      } else if (dist > 0.5) {
+        lastPos = { x: pos.x, y: pos.y, z: pos.z };
+      }
+    }, 1000);
+  });
+
+  bot.on('end', () => {
+    if (positionCheckInterval) clearInterval(positionCheckInterval);
+  });
+
   // Сервер иногда шлёт одно и то же сообщение через несколько chat-пакетов:
   // один раз с настоящим ником (но текст вида "Ник: текст"), второй раз —
   // с кланом/привилегией вместо ника, а настоящий ник спрятан в тексте
